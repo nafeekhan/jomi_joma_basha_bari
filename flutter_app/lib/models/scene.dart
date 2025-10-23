@@ -150,10 +150,14 @@ class Scene extends Equatable {
   final double initialViewPitch;
   final double initialViewFov;
   final DateTime createdAt;
+  final String? roomId;
+  final String? viewpointName;
+  final bool isDefaultViewpoint;
 
-  // Additional fields loaded lazily
+  // Additional fields loaded lazily or injected locally
   final List<SceneImage>? images;
   final List<Hotspot>? hotspots;
+  final List<String>? _localImagePaths;
 
   const Scene({
     required this.id,
@@ -164,9 +168,51 @@ class Scene extends Equatable {
     required this.initialViewPitch,
     required this.initialViewFov,
     required this.createdAt,
+    this.roomId,
+    this.viewpointName,
+    this.isDefaultViewpoint = false,
     this.images,
     this.hotspots,
-  });
+    List<String>? localImagePaths,
+  }) : _localImagePaths = localImagePaths;
+
+  /// Convenience constructor for local-only scenes (e.g. upload drafts)
+  factory Scene.localDraft({
+    required String id,
+    required String name,
+    required int sceneOrder,
+    List<String>? imagePaths,
+    bool isDefaultViewpoint = false,
+  }) {
+    return Scene(
+      id: id,
+      propertyId: '',
+      sceneName: name,
+      sceneOrder: sceneOrder,
+      initialViewYaw: 0.0,
+      initialViewPitch: 0.0,
+      initialViewFov: 1.5708,
+      createdAt: DateTime.now(),
+      viewpointName: name,
+      isDefaultViewpoint: isDefaultViewpoint,
+      localImagePaths: imagePaths,
+      hotspots: const [],
+    );
+  }
+
+  String get name => viewpointName ?? sceneName;
+
+  List<String> get imagePaths {
+    final localPaths = _localImagePaths;
+    if (localPaths != null) {
+      return localPaths;
+    }
+    final remoteImages = images;
+    if (remoteImages != null) {
+      return remoteImages.map((image) => image.filePath).toList();
+    }
+    return const [];
+  }
 
   factory Scene.fromJson(Map<String, dynamic> json) {
     return Scene(
@@ -178,6 +224,9 @@ class Scene extends Equatable {
       initialViewPitch: (json['initial_view_pitch'] as num?)?.toDouble() ?? 0.0,
       initialViewFov: (json['initial_view_fov'] as num?)?.toDouble() ?? 1.5708,
       createdAt: DateTime.parse(json['created_at'] as String),
+      roomId: json['room_id'] as String?,
+      viewpointName: json['viewpoint_name'] as String?,
+      isDefaultViewpoint: json['is_default_viewpoint'] as bool? ?? false,
       images: json['images'] != null
           ? (json['images'] as List).map((i) => SceneImage.fromJson(i as Map<String, dynamic>)).toList()
           : null,
@@ -197,6 +246,9 @@ class Scene extends Equatable {
       'initial_view_pitch': initialViewPitch,
       'initial_view_fov': initialViewFov,
       'created_at': createdAt.toIso8601String(),
+      if (roomId != null) 'room_id': roomId,
+      if (viewpointName != null) 'viewpoint_name': viewpointName,
+      'is_default_viewpoint': isDefaultViewpoint,
     };
   }
 
@@ -213,8 +265,12 @@ class Scene extends Equatable {
       initialViewPitch: initialViewPitch,
       initialViewFov: initialViewFov,
       createdAt: createdAt,
+      roomId: roomId,
+      viewpointName: viewpointName,
+      isDefaultViewpoint: isDefaultViewpoint,
       images: images ?? this.images,
       hotspots: hotspots ?? this.hotspots,
+      localImagePaths: _localImagePaths,
     );
   }
 
@@ -228,6 +284,9 @@ class Scene extends Equatable {
         initialViewPitch,
         initialViewFov,
         createdAt,
+        roomId,
+        viewpointName,
+        isDefaultViewpoint,
+        _localImagePaths,
       ];
 }
-

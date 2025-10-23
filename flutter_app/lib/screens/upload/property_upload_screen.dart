@@ -689,19 +689,21 @@ class _PropertyUploadScreenState extends State<PropertyUploadScreen> {
         else
           ..._scenes.map((sceneData) {
             final sceneId = sceneData.name; // Use scene name as temporary ID
+            final imagePaths = sceneData.images.map((f) => f.path).toList();
+
             return HotspotEditor(
-              scene: Scene(
+              scene: Scene.localDraft(
                 id: sceneId,
                 name: sceneData.name,
-                imagePaths: sceneData.images.map((f) => f.path).toList(),
                 sceneOrder: _scenes.indexOf(sceneData),
+                imagePaths: imagePaths,
               ),
               allScenes: _scenes.map((s) {
-                return Scene(
+                return Scene.localDraft(
                   id: s.name,
                   name: s.name,
-                  imagePaths: s.images.map((f) => f.path).toList(),
                   sceneOrder: _scenes.indexOf(s),
+                  imagePaths: s.images.map((f) => f.path).toList(),
                 );
               }).toList(),
               onHotspotsChanged: (hotspots) {
@@ -831,4 +833,3 @@ class SceneUploadData {
     this.images = const [],
   });
 }
-

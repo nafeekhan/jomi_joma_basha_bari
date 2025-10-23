@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import PanoramaViewer, { PANORAMAS } from './PanoramaViewer';
 import '../styles/PropertyDetail.css';
 
 /**
@@ -8,25 +8,18 @@ import '../styles/PropertyDetail.css';
  */
 const PropertyDetail = () => {
   const [property, setProperty] = useState(null);
-  const [scenes, setScenes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [show360Tour, setShow360Tour] = useState(false);
-
-  // Test property ID - simple 3-scene tour
-  const propertyId = '762f8ee2-c205-4061-af76-3e2b20fae106';
-  const API_BASE_URL = 'http://localhost:3001';
 
   useEffect(() => {
     loadPropertyDetails();
   }, []);
 
-  const loadPropertyDetails = async () => {
+  const loadPropertyDetails = () => {
     try {
       setLoading(true);
-      
-      // In production, these would be actual API calls
-      // For demo, using mock data
+
       const mockProperty = {
         id: '1',
         title: 'Modern 3BR Apartment in Downtown',
@@ -42,21 +35,11 @@ const PropertyDetail = () => {
         totalReviews: 12,
         sellerName: 'Premium Real Estate Co.',
         sellerEmail: 'contact@premiumrealty.com',
-        images: [
-          '/api/placeholder/800/600',
-          '/api/placeholder/800/600',
-        ],
+        images: PANORAMAS.map((scene) => scene.imageUrl),
         tags: ['Modern', 'Downtown', 'Parking', 'Gym'],
       };
 
-      const mockScenes = [
-        { id: '1', name: 'Living Room', order: 0 },
-        { id: '2', name: 'Kitchen', order: 1 },
-        { id: '3', name: 'Master Bedroom', order: 2 },
-      ];
-
       setProperty(mockProperty);
-      setScenes(mockScenes);
       setLoading(false);
     } catch (err) {
       setError(err.message);
@@ -108,14 +91,7 @@ const PropertyDetail = () => {
             </button>
             <h2>360° Virtual Tour - {property.title}</h2>
             <div className="tour-viewer">
-              <iframe
-                src={`${API_BASE_URL}/viewer?propertyId=${propertyId}`}
-                title="360° Virtual Tour"
-                width="100%"
-                height="100%"
-                frameBorder="0"
-                allowFullScreen
-              ></iframe>
+              <PanoramaViewer />
             </div>
             <div className="tour-controls">
               <span>🖱️ Drag to rotate</span>
@@ -134,7 +110,7 @@ const PropertyDetail = () => {
       </div>
 
       {/* 360 Tour Button */}
-      {scenes.length > 0 && (
+      {PANORAMAS.length > 0 && (
         <div className="tour-button-container">
           <button className="tour-button" onClick={() => setShow360Tour(true)}>
             🌐 View 360° Virtual Tour
@@ -217,4 +193,3 @@ const PropertyDetail = () => {
 };
 
 export default PropertyDetail;
-

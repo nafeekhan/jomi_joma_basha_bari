@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useRef } from 'react';
 import '../styles/HotspotEditor.css';
 
 /**
@@ -11,7 +11,6 @@ const HotspotEditor = ({ scene, allScenes, onHotspotsChange }) => {
   const [showTargetSelector, setShowTargetSelector] = useState(false);
   const [clickPosition, setClickPosition] = useState(null);
   const viewerRef = useRef(null);
-  const iframeRef = useRef(null);
 
   // Generate a unique URL for the preview viewer
   const previewUrl = scene.images && scene.images.length > 0
@@ -254,4 +253,3 @@ const HotspotEditor = ({ scene, allScenes, onHotspotsChange }) => {
 };
 
 export default HotspotEditor;
-

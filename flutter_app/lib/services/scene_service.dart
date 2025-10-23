@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 import 'package:mime/mime.dart';
 import '../models/scene.dart';
 import '../config/api_config.dart';
@@ -74,7 +75,7 @@ class SceneService {
           final file = await http.MultipartFile.fromPath(
             'scene_images',
             image.path,
-            contentType: http.MediaType.parse(mimeType),
+            contentType: MediaType.parse(mimeType),
           );
           files.add(file);
         }
@@ -121,7 +122,7 @@ class SceneService {
         final file = await http.MultipartFile.fromPath(
           'scene_images',
           image.path,
-          contentType: http.MediaType.parse(mimeType),
+          contentType: MediaType.parse(mimeType),
         );
         files.add(file);
       }
@@ -210,4 +211,3 @@ class SceneService {
     _apiService.dispose();
   }
 }
-

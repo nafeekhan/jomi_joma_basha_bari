@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { Tooltip } from 'react-tooltip';
-import axios from 'axios';
 import HotspotEditor from './HotspotEditor';
 import RoomViewpointEditor from './RoomViewpointEditor';
 import '../styles/SellerUpload.css';
@@ -579,4 +578,3 @@ const SceneCard = ({ scene, index, onRemove, onNameChange, onImagesAdd, onImageR
 };
 
 export default SellerUpload;
-
