@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>360° Virtual Tour</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    }
+
+    #pano {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      top: 0;
+      left: 0;
+    }
+
+    /* Scene selector */
+    #sceneList {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.7);
+      border-radius: 12px;
+      padding: 12px;
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      max-width: 90%;
+      z-index: 10;
+      backdrop-filter: blur(10px);
+    }
+
+    .scene-button {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      border: none;
+      color: white;
+      padding: 10px 18px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
+      transition: all 0.3s ease;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+
+    .scene-button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 12px rgba(0, 0, 0, 0.2);
+    }
+
+    .scene-button.active {
+      background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+      box-shadow: 0 6px 12px rgba(245, 87, 108, 0.4);
+    }
+
+    /* Loading spinner */
+    #loading {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      z-index: 100;
+      text-align: center;
+    }
+
+    .spinner {
+      border: 4px solid rgba(255, 255, 255, 0.3);
+      border-radius: 50%;
+      border-top: 4px solid #667eea;
+      width: 50px;
+      height: 50px;
+      animation: spin 1s linear infinite;
+      margin: 0 auto;
+    }
+
+    #loading p {
+      color: white;
+      margin-top: 15px;
+      font-size: 16px;
+      text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    /* Hotspot styles */
+    .hotspot {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: rgba(102, 126, 234, 0.9);
+      border: 3px solid white;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-size: 20px;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+    }
+
+    .hotspot:hover {
+      transform: scale(1.2);
+      background: rgba(245, 87, 108, 0.9);
+      box-shadow: 0 6px 12px rgba(0, 0, 0, 0.4);
+    }
+
+    .hotspot.navigation::after {
+      content: '→';
+    }
+
+    .hotspot.info::after {
+      content: 'ℹ';
+    }
+
+    /* Info popup */
+    .info-popup {
+      position: absolute;
+      background: white;
+      padding: 15px;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+      max-width: 250px;
+      z-index: 20;
+      display: none;
+    }
+
+    .info-popup.active {
+      display: block;
+    }
+
+    .info-popup h3 {
+      margin: 0 0 8px 0;
+      font-size: 16px;
+      color: #333;
+    }
+
+    .info-popup p {
+      margin: 0;
+      font-size: 14px;
+      color: #666;
+    }
+  </style>
+</head>
+<body>
+  <div id="loading">
+    <div class="spinner"></div>
+    <p>Loading Virtual Tour...</p>
+  </div>
+  <div id="pano"></div>
+  <div id="sceneList"></div>
+  <div id="infoPopup" class="info-popup"></div>
+
+  <script src="/marzipano.js"></script>
+  <script>
+    // Get property ID from URL parameter
+    const urlParams = new URLSearchParams(window.location.search);
+    const propertyId = urlParams.get('propertyId');
+    const apiBaseUrl = window.location.origin;
+
+    let viewer;
+    let scenes = [];
+    let currentSceneIndex = 0;
+
+    // Initialize viewer
+    function initViewer() {
+      const panoElement = document.getElementById('pano');
+      viewer = new Marzipano.Viewer(panoElement, {
+        controls: {
+          mouseViewMode: 'drag'
+        }
+      });
+    }
+
+    // Load scenes list for property
+    async function loadScenesList() {
+      try {
+        const response = await fetch(`${apiBaseUrl}/api/properties/${propertyId}/scenes`);
+        const data = await response.json();
+        
+        if (data.success && data.data.scenes.length > 0) {
+          scenes = data.data.scenes;
+          renderSceneButtons();
+          await loadScene(0); // Load first scene
+        } else {
+          showError('No 360° tour available for this property');
+        }
+      } catch (error) {
+        console.error('Error loading scenes:', error);
+        showError('Failed to load virtual tour');
+      }
+    }
+
+    // Render scene selection buttons
+    function renderSceneButtons() {
+      const sceneList = document.getElementById('sceneList');
+      sceneList.innerHTML = '';
+
+      scenes.forEach((scene, index) => {
+        const button = document.createElement('button');
+        button.className = 'scene-button';
+        button.textContent = scene.scene_name;
+        button.onclick = () => loadScene(index);
+        if (index === currentSceneIndex) {
+          button.classList.add('active');
+        }
+        sceneList.appendChild(button);
+      });
+    }
+
+    // Load a specific scene (lazy loading)
+    async function loadScene(index) {
+      try {
+        showLoading();
+        currentSceneIndex = index;
+        const scene = scenes[index];
+
+        // Fetch full scene data with images and hotspots
+        const response = await fetch(`${apiBaseUrl}/api/scenes/${scene.id}`);
+        const data = await response.json();
+
+        if (data.success) {
+          const sceneData = data.data.scene;
+          
+          // For simplicity, using a single image as preview
+          // In production, you'd process the tiles properly
+          const previewImage = sceneData.images.find(img => img.image_type === 'preview');
+          
+          if (previewImage) {
+            // Create Marzipano scene with single image (equirectangular)
+            const source = Marzipano.ImageUrlSource.fromString(
+              `${apiBaseUrl}/${previewImage.file_path}`
+            );
+
+            const geometry = new Marzipano.EquirectGeometry([{ width: 4096 }]);
+
+            const limiter = Marzipano.RectilinearView.limit.traditional(4096, 120 * Math.PI / 180);
+            
+            const view = new Marzipano.RectilinearView({
+              yaw: sceneData.initial_view_yaw,
+              pitch: sceneData.initial_view_pitch,
+              fov: sceneData.initial_view_fov
+            }, limiter);
+
+            const marzipanoScene = viewer.createScene({
+              source: source,
+              geometry: geometry,
+              view: view,
+              pinFirstLevel: true
+            });
+
+            // Add hotspots
+            sceneData.hotspots.forEach(hotspot => {
+              addHotspot(marzipanoScene, hotspot);
+            });
+
+            // Switch to scene
+            marzipanoScene.switchTo({
+              transitionDuration: 1000
+            });
+          }
+
+          renderSceneButtons();
+          hideLoading();
+        }
+      } catch (error) {
+        console.error('Error loading scene:', error);
+        showError('Failed to load scene');
+      }
+    }
+
+    // Add hotspot to scene
+    function addHotspot(scene, hotspot) {
+      const element = document.createElement('div');
+      element.className = `hotspot ${hotspot.hotspot_type}`;
+
+      if (hotspot.hotspot_type === 'navigation') {
+        element.onclick = () => {
+          // Find target scene index
+          const targetIndex = scenes.findIndex(s => s.id === hotspot.target_scene_id);
+          if (targetIndex !== -1) {
+            loadScene(targetIndex);
+          }
+        };
+      } else if (hotspot.hotspot_type === 'info') {
+        element.onclick = (e) => {
+          showInfoPopup(hotspot, e.clientX, e.clientY);
+        };
+      }
+
+      const position = { yaw: hotspot.yaw, pitch: hotspot.pitch };
+      scene.hotspotContainer().createHotspot(element, position);
+    }
+
+    // Show info popup
+    function showInfoPopup(hotspot, x, y) {
+      const popup = document.getElementById('infoPopup');
+      popup.innerHTML = `
+        <h3>${hotspot.title || 'Information'}</h3>
+        <p>${hotspot.description || ''}</p>
+      `;
+      popup.style.left = x + 'px';
+      popup.style.top = y + 'px';
+      popup.classList.add('active');
+
+      setTimeout(() => {
+        popup.classList.remove('active');
+      }, 3000);
+    }
+
+    // Show/hide loading
+    function showLoading() {
+      document.getElementById('loading').style.display = 'block';
+    }
+
+    function hideLoading() {
+      document.getElementById('loading').style.display = 'none';
+    }
+
+    function showError(message) {
+      hideLoading();
+      document.getElementById('pano').innerHTML = `
+        <div style="display: flex; align-items: center; justify-content: center; height: 100%; color: white; text-align: center; padding: 20px;">
+          <div>
+            <h2 style="margin-bottom: 10px;">⚠️ ${message}</h2>
+            <p>Please check back later or contact support.</p>
+          </div>
+        </div>
+      `;
+    }
+
+    // Communication with Flutter WebView
+    function sendMessageToFlutter(message) {
+      if (window.FlutterChannel) {
+        window.FlutterChannel.postMessage(JSON.stringify(message));
+      }
+    }
+
+    // Initialize on load
+    if (propertyId) {
+      initViewer();
+      loadScenesList();
+    } else {
+      showError('No property ID provided');
+    }
+  </script>
+</body>
+</html>
+
