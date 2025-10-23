@@ -1,28 +1,20 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import '../styles/PanoramaViewer.css';
 
-export const PANORAMAS = [
-  {
-    id: 'living-room',
-    name: 'Living Room',
-    imageUrl: `${process.env.PUBLIC_URL}/test_360_images/living-room.jpg`,
-  },
-  {
-    id: 'kitchen',
-    name: 'Kitchen',
-    imageUrl: `${process.env.PUBLIC_URL}/test_360_images/kitchen.jpg`,
-  },
-  {
-    id: 'bedroom',
-    name: 'Bedroom',
-    imageUrl: `${process.env.PUBLIC_URL}/test_360_images/bedroom.jpg`,
-  },
-];
-
 const RADIAN = Math.PI / 180;
-const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+const DEGREE = 180 / Math.PI;
 
-const createSphereGeometry = (latBands = 32, lonBands = 64, radius = 1) => {
+const generateId = () => `hs-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`;
+
+const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+const wrapAngle = (angle) => {
+  let a = angle;
+  while (a < -Math.PI) a += 2 * Math.PI;
+  while (a > Math.PI) a -= 2 * Math.PI;
+  return a;
+};
+
+const createSphereGeometry = (latBands = 40, lonBands = 80, radius = 1) => {
   const positions = [];
   const uvs = [];
   const indices = [];
@@ -41,7 +33,7 @@ const createSphereGeometry = (latBands = 32, lonBands = 64, radius = 1) => {
       const y = cosTheta;
       const z = sinPhi * sinTheta;
 
-      positions.push(-radius * x, radius * y, radius * z); // invert X to look from inside
+      positions.push(-radius * x, radius * y, radius * z);
       uvs.push(1 - lon / lonBands, lat / latBands);
     }
   }
@@ -115,22 +107,10 @@ const createPerspectiveMatrix = (fov, aspect, near, far) => {
   const nf = 1 / (near - far);
 
   return new Float32Array([
-    f / aspect,
-    0,
-    0,
-    0,
-    0,
-    f,
-    0,
-    0,
-    0,
-    0,
-    (far + near) * nf,
-    -1,
-    0,
-    0,
-    (2 * far * near) * nf,
-    0,
+    f / aspect, 0, 0, 0,
+    0, f, 0, 0,
+    0, 0, (far + near) * nf, -1,
+    0, 0, (2 * far * near) * nf, 0,
   ]);
 };
 
@@ -160,21 +140,31 @@ const createViewMatrix = (yaw, pitch) => {
   const zAxis = [sinYaw * cosPitch, -sinPitch, cosPitch * cosYaw];
 
   return new Float32Array([
-    xAxis[0],
-    yAxis[0],
-    zAxis[0],
-    0,
-    xAxis[1],
-    yAxis[1],
-    zAxis[1],
-    0,
-    xAxis[2],
-    yAxis[2],
-    zAxis[2],
-    0,
-    0,
-    0,
-    0,
+    xAxis[0], yAxis[0], zAxis[0], 0,
+    xAxis[1], yAxis[1], zAxis[1], 0,
+    xAxis[2], yAxis[2], zAxis[2], 0,
+    0, 0, 0, 1,
+  ]);
+};
+
+const transformVector = (matrix, vector) => {
+  const out = new Float32Array(4);
+  for (let i = 0; i < 4; i += 1) {
+    out[i] =
+      matrix[i] * vector[0] +
+      matrix[i + 4] * vector[1] +
+      matrix[i + 8] * vector[2] +
+      matrix[i + 12] * vector[3];
+  }
+  return out;
+};
+
+const yawPitchToVector = (yaw, pitch) => {
+  const cosPitch = Math.cos(pitch);
+  return new Float32Array([
+    Math.sin(yaw) * cosPitch,
+    Math.sin(pitch),
+    Math.cos(yaw) * cosPitch,
     1,
   ]);
 };
@@ -212,7 +202,6 @@ const loadTexture = (gl, url) =>
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
       }
-
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
       resolve(texture);
     };
@@ -220,38 +209,46 @@ const loadTexture = (gl, url) =>
     image.src = url;
   });
 
-/**
- * Custom WebGL panorama viewer.
- */
-const PanoramaViewer = () => {
+const PanoramaViewer = ({
+  imageSrc,
+  hotspots = [],
+  onHotspotClick,
+  onAddHotspot,
+  editing = false,
+  hotspotTooltipFormatter,
+}) => {
   const containerRef = useRef(null);
   const canvasRef = useRef(null);
   const glRef = useRef(null);
   const programRef = useRef(null);
   const buffersRef = useRef(null);
   const animationRef = useRef(null);
-  const texturesRef = useRef({});
-
-  const [currentSceneId, setCurrentSceneId] = useState(PANORAMAS[0].id);
-  const [yaw, setYaw] = useState(0);
-  const [pitch, setPitch] = useState(0);
-  const [fov, setFov] = useState(75 * RADIAN);
-  const [loadingScene, setLoadingScene] = useState(PANORAMAS[0].id);
-  const [error, setError] = useState(null);
+  const textureRef = useRef(null);
 
   const yawRef = useRef(0);
   const pitchRef = useRef(0);
   const fovRef = useRef(75 * RADIAN);
 
+  const pointerStateRef = useRef({
+    dragging: false,
+    lastX: 0,
+    lastY: 0,
+    startX: 0,
+    startY: 0,
+    moved: false,
+  });
+
+  const [error, setError] = useState(null);
+  const [loadingTexture, setLoadingTexture] = useState(false);
+  const [hotspotPositions, setHotspotPositions] = useState([]);
+
+  const hotspotsMemo = useMemo(() => hotspots || [], [hotspots]);
+
   const initialiseGL = () => {
     const canvas = canvasRef.current;
-    if (!canvas) {
-      return;
-    }
+    if (!canvas) return;
     const gl = canvas.getContext('webgl', { antialias: true });
-    if (!gl) {
-      throw new Error('WebGL is not supported in this browser.');
-    }
+    if (!gl) throw new Error('WebGL is not supported in this browser.');
     glRef.current = gl;
 
     const program = createProgram(gl, vertexShaderSource, fragmentShaderSource);
@@ -306,12 +303,57 @@ const PanoramaViewer = () => {
     gl.viewport(0, 0, canvas.width, canvas.height);
   };
 
+  const recalculateHotspotPositions = useCallback(() => {
+    const canvas = canvasRef.current;
+    const gl = glRef.current;
+    const container = containerRef.current;
+    if (!canvas || !gl || !container) return [];
+
+    const aspect = canvas.width / canvas.height;
+    const projection = createPerspectiveMatrix(fovRef.current, aspect, 0.1, 100.0);
+    const view = createViewMatrix(yawRef.current, pitchRef.current);
+    const matrix = multiplyMatrices(projection, view);
+
+    const results = hotspotsMemo.map((hotspot) => {
+      const vector = yawPitchToVector(hotspot.yaw, hotspot.pitch);
+      const clip = transformVector(matrix, vector);
+      const w = clip[3] || 1;
+      const ndcX = clip[0] / w;
+      const ndcY = clip[1] / w;
+      const ndcZ = clip[2] / w;
+
+      const visible =
+        w > 0 &&
+        ndcZ <= 1 &&
+        ndcZ >= -1 &&
+        Math.abs(ndcX) <= 1 &&
+        Math.abs(ndcY) <= 1;
+
+      const screenX = ((ndcX + 1) / 2) * container.clientWidth;
+      const screenY = ((-ndcY + 1) / 2) * container.clientHeight;
+
+      return {
+        id: hotspot.id || generateId(),
+        x: screenX,
+        y: screenY,
+        visible,
+        hotspot,
+      };
+    });
+
+    setHotspotPositions(results);
+  }, [hotspotsMemo]);
+
   const renderScene = () => {
     const gl = glRef.current;
     const program = programRef.current;
     const canvas = canvasRef.current;
     const buffers = buffersRef.current;
-    if (!gl || !program || !canvas || !buffers) return;
+    const texture = textureRef.current;
+    if (!gl || !program || !canvas || !buffers || !texture) {
+      animationRef.current = requestAnimationFrame(renderScene);
+      return;
+    }
 
     resizeCanvas();
 
@@ -326,183 +368,167 @@ const PanoramaViewer = () => {
     const uMatrix = gl.getUniformLocation(program, 'uMatrix');
     gl.uniformMatrix4fv(uMatrix, false, matrix);
 
-    const texture = texturesRef.current[currentSceneId];
-    if (texture) {
-      const uTexture = gl.getUniformLocation(program, 'uTexture');
-      gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, texture);
-      gl.uniform1i(uTexture, 0);
-      gl.drawElements(gl.TRIANGLES, buffers.indexCount, gl.UNSIGNED_SHORT, 0);
-    }
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    const uTexture = gl.getUniformLocation(program, 'uTexture');
+    gl.uniform1i(uTexture, 0);
+
+    gl.drawElements(gl.TRIANGLES, buffers.indexCount, gl.UNSIGNED_SHORT, 0);
 
     animationRef.current = requestAnimationFrame(renderScene);
   };
 
-  const loadSceneTexture = async (scene) => {
-    const gl = glRef.current;
-    if (!gl) return;
+  const handlePointerDown = (event) => {
+    const container = containerRef.current;
+    if (!container) return;
+    container.focus?.();
+    pointerStateRef.current = {
+      dragging: true,
+      lastX: event.clientX,
+      lastY: event.clientY,
+      startX: event.clientX,
+      startY: event.clientY,
+      moved: false,
+    };
+    container.setPointerCapture?.(event.pointerId);
+  };
 
-    if (texturesRef.current[scene.id]) {
-      texturesRef.current = { ...texturesRef.current };
-      return;
+  const handlePointerMove = (event) => {
+    const pointerState = pointerStateRef.current;
+    if (!pointerState.dragging) return;
+
+    const deltaX = event.clientX - pointerState.lastX;
+    const deltaY = event.clientY - pointerState.lastY;
+    pointerState.lastX = event.clientX;
+    pointerState.lastY = event.clientY;
+
+    if (Math.abs(deltaX) > 1 || Math.abs(deltaY) > 1) {
+      pointerState.moved = true;
     }
 
-    setLoadingScene(scene.id);
-    setError(null);
-    try {
-      const texture = await loadTexture(gl, scene.imageUrl);
-      texturesRef.current = {
-        ...texturesRef.current,
-        [scene.id]: texture,
-      };
-      setLoadingScene((current) => (current === scene.id ? null : current));
-      return texture;
-    } catch (err) {
-      setError(err.message || 'Failed to load panorama image.');
-      setLoadingScene((current) => (current === scene.id ? null : current));
-      throw err;
+    yawRef.current -= deltaX * 0.0025;
+    pitchRef.current = clamp(pitchRef.current - deltaY * 0.0025, -Math.PI / 2 + 0.05, Math.PI / 2 - 0.05);
+
+    recalculateHotspotPositions();
+  };
+
+  const handlePointerUp = (event) => {
+    const pointerState = pointerStateRef.current;
+    if (!pointerState.dragging) return;
+    pointerState.dragging = false;
+    containerRef.current?.releasePointerCapture?.(event.pointerId);
+
+    if (!pointerState.moved && editing && typeof onAddHotspot === 'function') {
+      const { clientX, clientY } = event;
+      const container = containerRef.current;
+      const canvas = canvasRef.current;
+      if (!container || !canvas) return;
+
+      const rect = container.getBoundingClientRect();
+      const offsetX = clientX - rect.left;
+      const offsetY = clientY - rect.top;
+
+      const aspect = canvas.width / canvas.height;
+      const horizontalFov = 2 * Math.atan(Math.tan(fovRef.current / 2) * aspect);
+      const verticalFov = fovRef.current;
+
+      const normalizedX = offsetX / rect.width;
+      const normalizedY = offsetY / rect.height;
+
+      const newYaw = wrapAngle(yawRef.current + (0.5 - normalizedX) * horizontalFov);
+      const newPitch = clamp(pitchRef.current + (0.5 - normalizedY) * verticalFov, -Math.PI / 2 + 0.01, Math.PI / 2 - 0.01);
+
+      onAddHotspot({
+        id: generateId(),
+        yaw: newYaw,
+        pitch: newPitch,
+      });
     }
   };
 
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return () => {};
-    }
+  const handleWheel = (event) => {
+    event.preventDefault();
+    fovRef.current = clamp(fovRef.current + event.deltaY * 0.001, 35 * RADIAN, 100 * RADIAN);
+    recalculateHotspotPositions();
+  };
 
+  useEffect(() => {
     try {
       initialiseGL();
+      setError(null);
     } catch (err) {
+      console.error(err);
       setError(err.message);
       return () => {};
     }
 
-    const handleResize = () => resizeCanvas();
+    const handleResize = () => {
+      resizeCanvas();
+      recalculateHotspotPositions();
+    };
+
     window.addEventListener('resize', handleResize);
     resizeCanvas();
-
-    loadSceneTexture(PANORAMAS[0])
-      .catch(() => {
-        // leave error message visible; render loop still runs for future retries
-      })
-      .finally(() => {
-        renderScene();
-      });
+    recalculateHotspotPositions();
+    animationRef.current = requestAnimationFrame(renderScene);
 
     return () => {
       window.removeEventListener('resize', handleResize);
       if (animationRef.current) cancelAnimationFrame(animationRef.current);
       const gl = glRef.current;
-      if (gl) {
-        Object.values(texturesRef.current).forEach((texture) => gl.deleteTexture(texture));
+      if (gl && textureRef.current) {
+        gl.deleteTexture(textureRef.current);
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    if (!glRef.current) {
+    const gl = glRef.current;
+    if (!gl || !imageSrc) {
       return;
     }
-    const scene = PANORAMAS.find((item) => item.id === currentSceneId);
-    if (!scene) return;
-    if (!texturesRef.current[currentSceneId]) {
-      loadSceneTexture(scene);
-    }
-  }, [currentSceneId]);
-
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    let isDragging = false;
-    let lastX = 0;
-    let lastY = 0;
-
-    const handlePointerDown = (event) => {
-      isDragging = true;
-      lastX = event.clientX;
-      lastY = event.clientY;
-      container.setPointerCapture(event.pointerId);
-    };
-
-    const handlePointerMove = (event) => {
-      if (!isDragging) return;
-
-      const deltaX = event.clientX - lastX;
-      const deltaY = event.clientY - lastY;
-      lastX = event.clientX;
-      lastY = event.clientY;
-
-      setYaw((prev) => {
-        const next = prev - deltaX * 0.0025;
-        yawRef.current = next;
-        return next;
+    setLoadingTexture(true);
+    loadTexture(gl, imageSrc)
+      .then((texture) => {
+        if (textureRef.current) {
+          gl.deleteTexture(textureRef.current);
+        }
+        textureRef.current = texture;
+        setError(null);
+      })
+      .catch((err) => {
+        console.error(err);
+        setError(err.message);
+      })
+      .finally(() => {
+        setLoadingTexture(false);
       });
-      setPitch((prev) => {
-        const next = clamp(prev - deltaY * 0.0025, -Math.PI / 2 + 0.05, Math.PI / 2 - 0.05);
-        pitchRef.current = next;
-        return next;
-      });
-    };
-
-    const handlePointerUp = (event) => {
-      isDragging = false;
-      container.releasePointerCapture(event.pointerId);
-    };
-
-    const handleWheel = (event) => {
-      event.preventDefault();
-      setFov((prev) => {
-        const next = clamp(prev + event.deltaY * 0.001, 40 * RADIAN, 100 * RADIAN);
-        fovRef.current = next;
-        return next;
-      });
-    };
-
-    container.addEventListener('pointerdown', handlePointerDown);
-    container.addEventListener('pointermove', handlePointerMove);
-    container.addEventListener('pointerup', handlePointerUp);
-    container.addEventListener('pointerleave', handlePointerUp);
-    container.addEventListener('wheel', handleWheel, { passive: false });
-
-    return () => {
-      container.removeEventListener('pointerdown', handlePointerDown);
-      container.removeEventListener('pointermove', handlePointerMove);
-      container.removeEventListener('pointerup', handlePointerUp);
-      container.removeEventListener('pointerleave', handlePointerUp);
-      container.removeEventListener('wheel', handleWheel);
-    };
-  }, []);
+  }, [imageSrc]);
 
   useEffect(() => {
-    yawRef.current = yaw;
-  }, [yaw]);
-
-  useEffect(() => {
-    pitchRef.current = pitch;
-  }, [pitch]);
-
-  useEffect(() => {
-    fovRef.current = fov;
-  }, [fov]);
-
-  useEffect(() => {
-    if (!glRef.current) return;
-    requestAnimationFrame(renderScene);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentSceneId]);
-
+    recalculateHotspotPositions();
+  }, [hotspotsMemo, recalculateHotspotPositions]);
   return (
-    <div className="panorama-viewer">
-      <div ref={containerRef} className="panorama-canvas" role="presentation">
+    <div
+      ref={containerRef}
+      className={`panorama-viewer ${editing ? 'editing' : ''}`}
+      tabIndex={0}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerLeave={handlePointerUp}
+      onWheel={handleWheel}
+      role="application"
+      aria-label="360 degree viewer"
+    >
+      <div className="panorama-canvas" role="presentation">
         <canvas ref={canvasRef} />
       </div>
 
-      {(loadingScene || error) && (
+      {(loadingTexture || error) && (
         <div className={`panorama-overlay ${error ? 'error' : ''}`}>
-          {error ? (
-            <span>{error}</span>
-          ) : (
+          {error ? <span>{error}</span> : (
             <>
               <div className="spinner" />
               <span>Loading panorama…</span>
@@ -511,20 +537,41 @@ const PanoramaViewer = () => {
         </div>
       )}
 
-      <div className="panorama-scene-selector">
-        {PANORAMAS.map((scene) => (
+      {hotspotPositions.map(({ id, x, y, visible, hotspot }) => {
+        if (!visible) return null;
+        const label = hotspotTooltipFormatter
+          ? hotspotTooltipFormatter(hotspot)
+          : hotspot.label || 'Navigate';
+        return (
           <button
-            key={scene.id}
+            key={id}
             type="button"
-            className={`scene-button ${scene.id === currentSceneId ? 'active' : ''}`}
-            onClick={() => setCurrentSceneId(scene.id)}
+            className="panorama-hotspot"
+            style={{ transform: `translate(-50%, -50%) translate(${x}px, ${y}px)` }}
+            onClick={(event) => {
+              event.stopPropagation();
+              if (typeof onHotspotClick === 'function') {
+                onHotspotClick(hotspot);
+              }
+            }}
           >
-            {scene.name}
+            <span className="panorama-hotspot-icon">➜</span>
+            {label && <span className="panorama-hotspot-label">{label}</span>}
           </button>
-        ))}
-      </div>
+        );
+      })}
     </div>
   );
 };
+
+export const createHotspotFromClick = ({ yaw, pitch, label }) => ({
+  id: generateId(),
+  yaw,
+  pitch,
+  label,
+});
+
+export const radToDeg = (rad) => rad * DEGREE;
+export const degToRad = (deg) => deg * RADIAN;
 
 export default PanoramaViewer;

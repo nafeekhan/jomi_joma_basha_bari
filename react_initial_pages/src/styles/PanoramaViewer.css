@@ -71,6 +71,37 @@
   text-align: center;
 }
 
+.panorama-hotspot {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: center;
+  background: rgba(56, 189, 248, 0.9);
+  border: none;
+  color: #0f172a;
+  padding: 0.35rem 0.6rem;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 600;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.35);
+}
+
+.panorama-hotspot:hover {
+  background: rgba(56, 189, 248, 1);
+}
+
+.panorama-hotspot-icon {
+  font-size: 1rem;
+}
+
+.panorama-hotspot-label {
+  white-space: nowrap;
+}
+
 .panorama-overlay {
   position: absolute;
   top: 0;

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useDropzone } from 'react-dropzone';
+import { readFileAsDataUrl } from '../utils/file';
 import '../styles/RoomViewpointEditor.css';
 
 /**
@@ -34,18 +35,27 @@ const RoomViewpointEditor = ({ rooms, onRoomsChange }) => {
   };
 
   const addViewpoint = (roomId) => {
-    onRoomsChange(rooms.map(r => {
-      if (r.id === roomId) {
-        const isFirst = r.viewpoints.length === 0;
-        const newViewpoint = {
-          id: Date.now(),
-          name: `Viewpoint ${r.viewpoints.length + 1}`,
-          images: [],
-          isDefault: isFirst // First viewpoint is default
-        };
-        return { ...r, viewpoints: [...r.viewpoints, newViewpoint] };
-      }
-      return r;
+    onRoomsChange(rooms.map((room) => {
+      if (room.id !== roomId) return room;
+      const isFirst = room.viewpoints.length === 0;
+      const newViewpoint = {
+        id: `vp-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`,
+        name: `Viewpoint ${room.viewpoints.length + 1}`,
+        panoramaDataUrl: null,
+        isDefault: isFirst,
+        hotspots: [],
+      };
+      return {
+        ...room,
+        defaultViewpointId: isFirst ? newViewpoint.id : room.defaultViewpointId,
+        viewpoints: [
+          ...room.viewpoints.map((vp) => ({
+            ...vp,
+            hotspots: vp.hotspots || [],
+          })),
+          newViewpoint,
+        ],
+      };
     }));
   };
 
@@ -69,10 +79,11 @@ const RoomViewpointEditor = ({ rooms, onRoomsChange }) => {
         return {
           ...r,
           defaultViewpointId: viewpointId,
-          viewpoints: r.viewpoints.map(v => ({
+          viewpoints: r.viewpoints.map((v) => ({
             ...v,
-            isDefault: v.id === viewpointId
-          }))
+            hotspots: v.hotspots || [],
+            isDefault: v.id === viewpointId,
+          })),
         };
       }
       return r;
@@ -80,31 +91,54 @@ const RoomViewpointEditor = ({ rooms, onRoomsChange }) => {
   };
 
   const removeViewpoint = (roomId, viewpointId) => {
-    onRoomsChange(rooms.map(r => {
-      if (r.id === roomId) {
-        const updatedViewpoints = r.viewpoints.filter(v => v.id !== viewpointId);
-        // If removed viewpoint was default, make first viewpoint default
-        if (updatedViewpoints.length > 0 && r.viewpoints.find(v => v.id === viewpointId)?.isDefault) {
-          updatedViewpoints[0].isDefault = true;
+    onRoomsChange(rooms.map((room) => {
+      if (room.id !== roomId) return room;
+      const removedViewpoint = room.viewpoints.find((v) => v.id === viewpointId);
+      const updatedViewpoints = room.viewpoints
+        .filter((v) => v.id !== viewpointId)
+        .map((vp) => ({ ...vp, hotspots: vp.hotspots || [] }));
+
+      let defaultViewpointId = room.defaultViewpointId;
+      if (removedViewpoint?.isDefault) {
+        if (updatedViewpoints.length > 0) {
+          defaultViewpointId = updatedViewpoints[0].id;
+          updatedViewpoints[0] = { ...updatedViewpoints[0], isDefault: true };
+          for (let i = 1; i < updatedViewpoints.length; i += 1) {
+            updatedViewpoints[i] = { ...updatedViewpoints[i], isDefault: false };
+          }
+        } else {
+          defaultViewpointId = null;
         }
-        return { ...r, viewpoints: updatedViewpoints };
       }
-      return r;
+
+      return {
+        ...room,
+        defaultViewpointId,
+        viewpoints: updatedViewpoints,
+      };
     }));
   };
 
-  const handleImageDrop = (roomId, viewpointId, acceptedFiles) => {
-    onRoomsChange(rooms.map(r => {
-      if (r.id === roomId) {
+  const handleImageDrop = async (roomId, viewpointId, acceptedFiles) => {
+    if (!acceptedFiles || acceptedFiles.length === 0) return;
+    const file = acceptedFiles[0];
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      onRoomsChange(rooms.map((room) => {
+        if (room.id !== roomId) return room;
         return {
-          ...r,
-          viewpoints: r.viewpoints.map(v =>
-            v.id === viewpointId ? { ...v, images: acceptedFiles } : v
-          )
+          ...room,
+          viewpoints: room.viewpoints.map((viewpoint) =>
+            viewpoint.id === viewpointId
+              ? { ...viewpoint, panoramaDataUrl: dataUrl, imageName: file.name }
+              : viewpoint
+          ),
         };
-      }
-      return r;
-    }));
+      }));
+    } catch (error) {
+      console.error('Failed to read panorama image', error);
+      alert('Failed to read image file. Please try again with a valid 360° image.');
+    }
   };
 
   return (
@@ -255,14 +289,11 @@ const ViewpointCard = ({ viewpoint, onNameChange, onSetDefault, onRemove, onImag
 
       <div {...getRootProps()} className={`image-dropzone ${isDragActive ? 'drag-active' : ''}`}>
         <input {...getInputProps()} />
-        {viewpoint.images.length > 0 ? (
+        {viewpoint.panoramaDataUrl ? (
           <div className="image-preview">
-            <img
-              src={URL.createObjectURL(viewpoint.images[0])}
-              alt={viewpoint.name}
-            />
+            <img src={viewpoint.panoramaDataUrl} alt={viewpoint.name} />
             <div className="image-overlay">
-              <span>✓ {viewpoint.images[0].name}</span>
+              <span>✓ {viewpoint.imageName || 'Panorama image selected'}</span>
               <small>Click or drag to replace</small>
             </div>
           </div>
@@ -292,4 +323,3 @@ const ViewpointCard = ({ viewpoint, onNameChange, onSetDefault, onRemove, onImag
 };
 
 export default RoomViewpointEditor;
-

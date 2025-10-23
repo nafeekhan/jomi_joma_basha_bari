@@ -1,150 +1,133 @@
-import React, { useState } from 'react';
-import { useDropzone } from 'react-dropzone';
+import React, { useMemo, useState } from 'react';
 import { Tooltip } from 'react-tooltip';
-import HotspotEditor from './HotspotEditor';
 import RoomViewpointEditor from './RoomViewpointEditor';
+import HotspotEditor from './HotspotEditor';
+import {
+  createProperty,
+  savePropertyToStorage,
+  clearPropertyStorage,
+  loadPropertyFromStorage,
+  normaliseRooms,
+} from '../models/property';
+import { extractCoverImage, SAMPLE_PROPERTY } from '../data/sampleProperty';
 import '../styles/SellerUpload.css';
 
-/**
- * Seller Upload Component (PRIORITY-1)
- * Allows sellers to upload properties with 360° images
- * Includes tooltips and helpful hints
- */
+const initialFormState = {
+  title: SAMPLE_PROPERTY.title,
+  description: SAMPLE_PROPERTY.description,
+  propertyType: SAMPLE_PROPERTY.propertyType,
+  price: SAMPLE_PROPERTY.price,
+  bedrooms: SAMPLE_PROPERTY.bedrooms,
+  bathrooms: SAMPLE_PROPERTY.bathrooms,
+  sizeSqft: SAMPLE_PROPERTY.sizeSqft,
+  furnished: SAMPLE_PROPERTY.furnished,
+  addressLine: SAMPLE_PROPERTY.addressLine,
+  city: SAMPLE_PROPERTY.city,
+  state: SAMPLE_PROPERTY.state,
+  country: SAMPLE_PROPERTY.country,
+  postalCode: SAMPLE_PROPERTY.postalCode,
+  tags: SAMPLE_PROPERTY.tags,
+};
+
 const SellerUpload = () => {
   const [currentStep, setCurrentStep] = useState(0);
   const [loading, setLoading] = useState(false);
 
-  // Form state
-  const [formData, setFormData] = useState({
-    title: '',
-    description: '',
-    propertyType: 'buy',
-    price: '',
-    bedrooms: '',
-    bathrooms: '',
-    sizeSqft: '',
-    furnished: false,
-    addressLine: '',
-    city: '',
-    state: '',
-    country: '',
-    postalCode: '',
-    tags: [],
-  });
+  const storedProperty = useMemo(() => loadPropertyFromStorage(), []);
 
-  const [scenes, setScenes] = useState([]);
-  const [rooms, setRooms] = useState([]); // NEW: Rooms with viewpoints
+  const [formData, setFormData] = useState(() => ({
+    ...initialFormState,
+    ...(storedProperty || {}),
+  }));
 
-  const handleInputChange = (e) => {
-    const { name, value, type, checked } = e.target;
-    setFormData(prev => ({
+  const [rooms, setRooms] = useState(() => normaliseRooms(storedProperty?.rooms || SAMPLE_PROPERTY.rooms));
+  const [showResetConfirmation, setShowResetConfirmation] = useState(false);
+
+  const handleInputChange = (event) => {
+    const { name, value, type, checked } = event.target;
+    setFormData((prev) => ({
       ...prev,
-      [name]: type === 'checkbox' ? checked : value
+      [name]: type === 'checkbox' ? checked : value,
     }));
   };
 
-  const addScene = () => {
-    setScenes([...scenes, {
-      id: Date.now(),
-      name: `Room ${scenes.length + 1}`,
-      images: [],
-      hotspots: [] // Add hotspots array for each scene
-    }]);
+  const goToNextStep = () => {
+    setCurrentStep((step) => Math.min(step + 1, steps.length - 1));
   };
 
-  const removeScene = (sceneId) => {
-    setScenes(scenes.filter(s => s.id !== sceneId));
+  const goToPrevStep = () => {
+    setCurrentStep((step) => Math.max(step - 1, 0));
   };
 
-  const handleHotspotsChange = (sceneId, hotspots) => {
-    setScenes(scenes.map(s => 
-      s.id === sceneId ? { ...s, hotspots } : s
-    ));
-  };
-
-  const updateSceneName = (sceneId, name) => {
-    setScenes(scenes.map(s => 
-      s.id === sceneId ? { ...s, name } : s
-    ));
-  };
-
-  const handleSceneImages = (sceneId, files) => {
-    setScenes(scenes.map(s => 
-      s.id === sceneId ? { ...s, images: [...s.images, ...files] } : s
-    ));
-  };
-
-  const removeSceneImage = (sceneId, imageIndex) => {
-    setScenes(scenes.map(s => {
-      if (s.id === sceneId) {
-        const newImages = [...s.images];
-        newImages.splice(imageIndex, 1);
-        return { ...s, images: newImages };
-      }
-      return s;
-    }));
-  };
-
-  const handleSubmit = async () => {
+  const handleSave = async () => {
     setLoading(true);
-
     try {
-      // In production, this would upload to the backend
-      console.log('Property Data:', formData);
-      console.log('360° Scenes:', scenes);
-
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 2000));
-
-      alert('Property uploaded successfully!');
-      
-      // Reset form
-      setFormData({
-        title: '',
-        description: '',
-        propertyType: 'buy',
-        price: '',
-        bedrooms: '',
-        bathrooms: '',
-        sizeSqft: '',
-        furnished: false,
-        addressLine: '',
-        city: '',
-        state: '',
-        country: '',
-        postalCode: '',
-        tags: [],
+      const property = createProperty({
+        ...formData,
+        rooms: normaliseRooms(rooms),
       });
-      setScenes([]);
+      savePropertyToStorage(property);
+      alert('Property saved! Open the Property Detail page to preview the virtual tour.');
       setCurrentStep(0);
     } catch (error) {
-      alert('Error uploading property: ' + error.message);
+      console.error('Failed to save property', error);
+      alert('Failed to save property. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
-  const steps = ['Basic Information', 'Add Rooms & Viewpoints', 'Add Hotspots', 'Review & Submit'];
+  const handleReset = () => {
+    clearPropertyStorage();
+    setRooms(normaliseRooms(SAMPLE_PROPERTY.rooms));
+    setFormData(initialFormState);
+    setShowResetConfirmation(false);
+  };
+
+  const steps = ['Basic Information', 'Add Rooms & Viewpoints', 'Add Navigation Hotspots', 'Review & Save'];
+
+  const canContinueFromStep = (step) => {
+    if (step === 0) {
+      return Boolean(formData.title && formData.price);
+    }
+    if (step === 1) {
+      const hasRoom = rooms.length > 0;
+      const allViewpointsHaveImages = rooms.every((room) =>
+        room.viewpoints.length > 0 && room.viewpoints.every((viewpoint) => viewpoint.panoramaDataUrl)
+      );
+      return hasRoom && allViewpointsHaveImages;
+    }
+    if (step === 2) {
+      return rooms.some((room) => room.viewpoints.some((viewpoint) => (viewpoint.hotspots || []).length > 0));
+    }
+    return true;
+  };
+
+  const coverImage = extractCoverImage({ rooms });
 
   return (
     <div className="seller-upload-container">
       <div className="upload-header">
         <h1>Upload Property</h1>
-        <button 
-          className="help-btn"
-          data-tooltip-id="general-help"
-          data-tooltip-content="This wizard will guide you through uploading your property with 360° virtual tour"
-        >
-          ❓ Help
-        </button>
+        <div className="header-actions">
+          <button
+            className="help-btn"
+            data-tooltip-id="general-help"
+            data-tooltip-content="This wizard guides you through preparing a property with a 360° virtual tour."
+          >
+            ❓ Help
+          </button>
+          <button className="reset-btn" onClick={() => setShowResetConfirmation(true)}>
+            Reset
+          </button>
+        </div>
         <Tooltip id="general-help" />
       </div>
 
-      {/* Progress Steps */}
       <div className="stepper">
         {steps.map((step, index) => (
-          <div 
-            key={index} 
+          <div
+            key={step}
             className={`step ${currentStep >= index ? 'active' : ''} ${currentStep === index ? 'current' : ''}`}
           >
             <div className="step-number">{index + 1}</div>
@@ -153,32 +136,36 @@ const SellerUpload = () => {
         ))}
       </div>
 
-      {/* Step Content */}
       <div className="step-content">
         {currentStep === 0 && (
           <div className="basic-info-step">
             <h2>Basic Property Information</h2>
+            <p className="step-intro">
+              Fill in the essential information for your property. This appears on the detail page alongside the virtual tour.
+            </p>
 
-            <div className="form-group">
-              <label>
-                Property Title *
-                <span 
-                  className="info-icon"
-                  data-tooltip-id="title-tooltip"
-                  data-tooltip-content="Enter an attractive, descriptive title for your property"
-                >
-                  ℹ️
-                </span>
-              </label>
-              <input
-                type="text"
-                name="title"
-                value={formData.title}
-                onChange={handleInputChange}
-                placeholder="e.g., Modern 3BR Apartment in Downtown"
-                required
-              />
-              <Tooltip id="title-tooltip" />
+            <div className="two-column-grid">
+              <div className="form-group">
+                <label>Property Title *</label>
+                <input
+                  type="text"
+                  name="title"
+                  value={formData.title}
+                  onChange={handleInputChange}
+                  required
+                />
+              </div>
+              <div className="form-group">
+                <label>Price *</label>
+                <input
+                  type="number"
+                  name="price"
+                  value={formData.price}
+                  onChange={handleInputChange}
+                  min="0"
+                  required
+                />
+              </div>
             </div>
 
             <div className="form-group">
@@ -187,48 +174,11 @@ const SellerUpload = () => {
                 name="description"
                 value={formData.description}
                 onChange={handleInputChange}
-                placeholder="Describe your property features and amenities..."
                 rows={4}
               />
             </div>
 
-            <div className="form-row">
-              <div className="form-group">
-                <label>Type *</label>
-                <select
-                  name="propertyType"
-                  value={formData.propertyType}
-                  onChange={handleInputChange}
-                >
-                  <option value="buy">For Sale</option>
-                  <option value="rent">For Rent</option>
-                </select>
-              </div>
-
-              <div className="form-group">
-                <label>
-                  Price (USD) *
-                  <span 
-                    className="info-icon"
-                    data-tooltip-id="price-tooltip"
-                    data-tooltip-content="Enter the price in USD"
-                  >
-                    ℹ️
-                  </span>
-                </label>
-                <input
-                  type="number"
-                  name="price"
-                  value={formData.price}
-                  onChange={handleInputChange}
-                  placeholder="450000"
-                  required
-                />
-                <Tooltip id="price-tooltip" />
-              </div>
-            </div>
-
-            <div className="form-row">
+            <div className="two-column-grid">
               <div className="form-group">
                 <label>Bedrooms</label>
                 <input
@@ -236,10 +186,9 @@ const SellerUpload = () => {
                   name="bedrooms"
                   value={formData.bedrooms}
                   onChange={handleInputChange}
-                  placeholder="3"
+                  min="0"
                 />
               </div>
-
               <div className="form-group">
                 <label>Bathrooms</label>
                 <input
@@ -247,86 +196,72 @@ const SellerUpload = () => {
                   name="bathrooms"
                   value={formData.bathrooms}
                   onChange={handleInputChange}
-                  placeholder="2"
+                  min="0"
                 />
               </div>
+            </div>
 
+            <div className="two-column-grid">
               <div className="form-group">
-                <label>Size (sqft)</label>
+                <label>Square Footage</label>
                 <input
                   type="number"
                   name="sizeSqft"
                   value={formData.sizeSqft}
                   onChange={handleInputChange}
-                  placeholder="1500"
+                  min="0"
                 />
+              </div>
+              <div className="form-checkbox">
+                <label>
+                  <input
+                    type="checkbox"
+                    name="furnished"
+                    checked={!!formData.furnished}
+                    onChange={handleInputChange}
+                  />
+                  Furnished
+                </label>
               </div>
             </div>
 
-            <div className="form-group checkbox-group">
-              <label>
+            <div className="address-grid">
+              <div className="form-group">
+                <label>Address Line</label>
                 <input
-                  type="checkbox"
-                  name="furnished"
-                  checked={formData.furnished}
+                  type="text"
+                  name="addressLine"
+                  value={formData.addressLine}
                   onChange={handleInputChange}
                 />
-                <span>Furnished</span>
-              </label>
-            </div>
-
-            <h3>Address</h3>
-
-            <div className="form-group">
-              <label>Street Address *</label>
-              <input
-                type="text"
-                name="addressLine"
-                value={formData.addressLine}
-                onChange={handleInputChange}
-                placeholder="123 Main Street"
-                required
-              />
-            </div>
-
-            <div className="form-row">
+              </div>
               <div className="form-group">
-                <label>City *</label>
+                <label>City</label>
                 <input
                   type="text"
                   name="city"
                   value={formData.city}
                   onChange={handleInputChange}
-                  placeholder="New York"
-                  required
                 />
               </div>
-
               <div className="form-group">
-                <label>State/Province</label>
+                <label>State/Region</label>
                 <input
                   type="text"
                   name="state"
                   value={formData.state}
                   onChange={handleInputChange}
-                  placeholder="NY"
                 />
               </div>
-            </div>
-
-            <div className="form-row">
               <div className="form-group">
-                <label>Country *</label>
+                <label>Country</label>
                 <input
                   type="text"
                   name="country"
                   value={formData.country}
                   onChange={handleInputChange}
-                  placeholder="USA"
-                  required
                 />
               </div>
-
               <div className="form-group">
                 <label>Postal Code</label>
                 <input
@@ -334,7 +269,6 @@ const SellerUpload = () => {
                   name="postalCode"
                   value={formData.postalCode}
                   onChange={handleInputChange}
-                  placeholder="10001"
                 />
               </div>
             </div>
@@ -342,235 +276,93 @@ const SellerUpload = () => {
         )}
 
         {currentStep === 1 && (
-          <div className="rooms-viewpoints-step">
-            <RoomViewpointEditor 
-              rooms={rooms}
-              onRoomsChange={setRooms}
-            />
-          </div>
+          <RoomViewpointEditor rooms={rooms} onRoomsChange={setRooms} />
         )}
 
         {currentStep === 2 && (
-          <div className="tour-step">
-            <h2>360° Virtual Tour (Legacy - Optional)</h2>
-
-            <div className="info-box">
-              <strong>📸 360° Tour Instructions</strong>
-              <p>
-                This step is optional if you've added rooms and viewpoints in the previous step.
-                Upload panoramic 360° images for each room. These should be equirectangular format images.
-                Buyers can navigate between rooms using interactive hotspots!
-              </p>
-            </div>
-
-            {scenes.map((scene, index) => (
-              <SceneCard
-                key={scene.id}
-                scene={scene}
-                index={index}
-                onRemove={() => removeScene(scene.id)}
-                onNameChange={(name) => updateSceneName(scene.id, name)}
-                onImagesAdd={(files) => handleSceneImages(scene.id, files)}
-                onImageRemove={(imgIndex) => removeSceneImage(scene.id, imgIndex)}
-              />
-            ))}
-
-            <button className="add-scene-btn" onClick={addScene}>
-              ➕ Add Another Room/Scene
-            </button>
-          </div>
+          <HotspotEditor rooms={rooms} onRoomsChange={setRooms} />
         )}
 
         {currentStep === 3 && (
-          <div className="hotspots-step">
-            <h2>Add Navigation Hotspots</h2>
-            
-            <div className="info-box">
-              <strong>🎯 Connect Your Rooms</strong>
-              <p>
-                Add navigation arrows on doors and passages so visitors can walk through your property naturally.
-                This creates an immersive experience where clicking on a door takes you to the next room!
-              </p>
-            </div>
-
-            {rooms.length === 0 && scenes.length === 0 ? (
-              <div className="no-scenes-message">
-                <p>📸 Please add rooms in the previous step before adding hotspots.</p>
-                <button 
-                  className="btn-secondary"
-                  onClick={() => setCurrentStep(1)}
-                >
-                  ← Go Back to Add Rooms
-                </button>
-              </div>
-            ) : (
-              <>
-                {scenes.map((scene, index) => (
-                  <HotspotEditor
-                    key={scene.id}
-                    scene={scene}
-                    allScenes={scenes}
-                    onHotspotsChange={(hotspots) => handleHotspotsChange(scene.id, hotspots)}
-                  />
-                ))}
-                
-                {scenes.length < 2 && (
-                  <div className="tip-box">
-                    💡 <strong>Tip:</strong> You need at least 2 rooms to create navigation hotspots between them.
-                    Add more rooms in the previous step!
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        )}
-
-        {currentStep === 4 && (
           <div className="review-step">
-            <h2>Review Your Property</h2>
+            <h2>Review & Save</h2>
+            <p className="step-intro">
+              Review the property information and ensure the rooms, viewpoints, and hotspots look correct.
+            </p>
 
-            <div className="review-section">
-              <h3>Property Details</h3>
-              <div className="review-item">
-                <strong>Title:</strong> {formData.title || 'Not provided'}
-              </div>
-              <div className="review-item">
-                <strong>Type:</strong> {formData.propertyType === 'buy' ? 'For Sale' : 'For Rent'}
-              </div>
-              <div className="review-item">
-                <strong>Price:</strong> ${formData.price || '0'}
-              </div>
-              <div className="review-item">
-                <strong>Address:</strong> {formData.addressLine || 'Not provided'}
-              </div>
-              <div className="review-item">
-                <strong>City:</strong> {formData.city || 'Not provided'}
-              </div>
-            </div>
-
-            <div className="review-section">
-              <h3>360° Virtual Tour</h3>
-              {rooms.length > 0 ? (
-                <>
-                  <div className="review-item">
-                    <strong>Rooms:</strong> {rooms.length} room(s)
+            <div className="review-grid">
+              <div className="review-card">
+                <img src={coverImage} alt="Cover" className="review-cover" />
+                <div className="review-info">
+                  <h3>{formData.title || 'Untitled Property'}</h3>
+                  <p>{formData.description}</p>
+                  <div className="review-stats">
+                    <span>💲 {Number(formData.price || 0).toLocaleString()}</span>
+                    <span>🛏️ {formData.bedrooms || 0}</span>
+                    <span>🛁 {formData.bathrooms || 0}</span>
+                    <span>📐 {formData.sizeSqft || 0} sqft</span>
                   </div>
-                  {rooms.map((room, index) => (
-                    <div key={room.id} className="review-item">
-                      <strong>{room.name}:</strong> {room.viewpoints?.length || 0} viewpoint(s)
-                      {room.viewpoints && room.viewpoints.map((vp, vpIndex) => (
-                        <div key={vp.id} style={{ marginLeft: '20px', fontSize: '0.9em' }}>
-                          → {vp.name}: {vp.images?.length || 0} image(s) {vp.isDefault && '⭐ (Default)'}
-                        </div>
-                      ))}
-                    </div>
-                  ))}
-                </>
-              ) : scenes.length > 0 ? (
-                <>
-                  <div className="review-item">
-                    <strong>Scenes (Legacy):</strong> {scenes.length} scene(s)
-                  </div>
-                  {scenes.map((scene, index) => (
-                    <div key={scene.id} className="review-item">
-                      <strong>Scene {index + 1}:</strong> {scene.name} ({scene.images.length} image(s), {scene.hotspots?.length || 0} hotspot(s))
-                    </div>
-                  ))}
-                </>
-              ) : (
-                <div className="review-item">
-                  <strong>No rooms or scenes added</strong>
                 </div>
-              )}
-            </div>
+              </div>
 
-            <button 
-              className="submit-btn" 
-              onClick={handleSubmit}
-              disabled={loading}
-            >
-              {loading ? '⏳ Uploading...' : '✅ Submit Property'}
-            </button>
+              <div className="review-rooms">
+                <h3>Rooms & Viewpoints</h3>
+                {rooms.map((room) => (
+                  <div key={room.id} className="review-room">
+                    <h4>{room.name}</h4>
+                    <ul>
+                      {room.viewpoints.map((viewpoint) => (
+                        <li key={viewpoint.id}>
+                          <strong>{viewpoint.name}</strong>
+                          {viewpoint.isDefault && <span className="chip-badge">Default</span>}
+                          <span className="review-hotspot-count">
+                            {(viewpoint.hotspots || []).length} hotspots
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         )}
       </div>
 
-      {/* Navigation Buttons */}
-      <div className="step-navigation">
-        {currentStep > 0 && (
-          <button 
-            className="btn-secondary"
-            onClick={() => setCurrentStep(currentStep - 1)}
-          >
-            ← Previous
-          </button>
-        )}
-        
-        {currentStep < steps.length - 1 && (
-          <button 
+      <div className="step-footer">
+        <button className="btn-secondary" onClick={goToPrevStep} disabled={currentStep === 0}>
+          ← Back
+        </button>
+        {currentStep < steps.length - 1 ? (
+          <button
             className="btn-primary"
-            onClick={() => setCurrentStep(currentStep + 1)}
+            onClick={goToNextStep}
+            disabled={!canContinueFromStep(currentStep)}
           >
             Next →
           </button>
+        ) : (
+          <button className="btn-primary" onClick={handleSave} disabled={loading}>
+            {loading ? 'Saving…' : 'Save Property'}
+          </button>
         )}
       </div>
-    </div>
-  );
-};
 
-// Scene Card Component
-const SceneCard = ({ scene, index, onRemove, onNameChange, onImagesAdd, onImageRemove }) => {
-  const { getRootProps, getInputProps } = useDropzone({
-    accept: {'image/*': []},
-    onDrop: onImagesAdd
-  });
-
-  return (
-    <div className="scene-card">
-      <div className="scene-header">
-        <div className="scene-number">{index + 1}</div>
-        <input
-          type="text"
-          className="scene-name-input"
-          value={scene.name}
-          onChange={(e) => onNameChange(e.target.value)}
-          placeholder="Room name (e.g., Living Room)"
-        />
-        <button className="remove-scene-btn" onClick={onRemove}>
-          🗑️
-        </button>
-      </div>
-
-      <div className="tip-box">
-        💡 Upload 360° panoramic images (equirectangular format) for best results
-      </div>
-
-      {scene.images.length > 0 && (
-        <div className="images-grid">
-          {scene.images.map((img, imgIndex) => (
-            <div key={imgIndex} className="image-preview">
-              <img src={URL.createObjectURL(img)} alt={`Scene ${imgIndex}`} />
-              <button 
-                className="remove-image-btn"
-                onClick={() => onImageRemove(imgIndex)}
-              >
-                ✕
+      {showResetConfirmation && (
+        <div className="hotspot-modal" role="dialog" aria-modal="true">
+          <div className="hotspot-modal-content">
+            <h3>Reset wizard?</h3>
+            <p>All progress will be lost and replaced with the default demo property.</p>
+            <div className="modal-options">
+              <button type="button" className="modal-option" onClick={handleReset}>
+                <strong>Reset Now</strong>
+                <span>This will clear stored property data.</span>
               </button>
             </div>
-          ))}
-        </div>
-      )}
-
-      <div {...getRootProps({ className: 'dropzone' })}>
-        <input {...getInputProps()} />
-        <p>📤 {scene.images.length === 0 ? 'Upload 360° Images' : 'Add More Images'}</p>
-        <small>Drag & drop or click to select files</small>
-      </div>
-
-      {scene.images.length > 0 && (
-        <div className="image-count">
-          ✓ {scene.images.length} image(s) uploaded
+            <button type="button" className="cancel-button" onClick={() => setShowResetConfirmation(false)}>
+              Cancel
+            </button>
+          </div>
         </div>
       )}
     </div>
