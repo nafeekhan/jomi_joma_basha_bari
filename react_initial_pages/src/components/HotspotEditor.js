@@ -65,6 +65,7 @@ const HotspotEditor = ({ rooms, onRoomsChange }) => {
 
   const commitHotspot = (targetViewpointId) => {
     if (!currentRoom || !currentViewpoint || !pendingHotspot) return;
+    const targetMeta = globalViewpointOptions.find((option) => option.viewpointId === targetViewpointId);
 
     onRoomsChange(
       rooms.map((room) => {
@@ -78,6 +79,8 @@ const HotspotEditor = ({ rooms, onRoomsChange }) => {
               yaw: pendingHotspot.yaw,
               pitch: pendingHotspot.pitch,
               targetViewpointId,
+              targetRoomId: targetMeta?.roomId,
+              label: targetMeta ? `${targetMeta.roomName} • ${targetMeta.viewpointName}` : 'Navigate',
             };
             return {
               ...viewpoint,
@@ -125,7 +128,7 @@ const HotspotEditor = ({ rooms, onRoomsChange }) => {
       const target = globalViewpointOptions.find((option) => option.viewpointId === hotspot.targetViewpointId);
       return {
         ...hotspot,
-        targetLabel: target ? `${target.roomName} • ${target.viewpointName}` : 'Unknown target',
+        targetLabel: hotspot.label || (target ? `${target.roomName} • ${target.viewpointName}` : 'Unknown target'),
       };
     });
   }, [currentViewpoint, globalViewpointOptions]);
@@ -220,11 +223,13 @@ const HotspotEditor = ({ rooms, onRoomsChange }) => {
             hotspots={(currentViewpoint.hotspots || []).map((hotspot) => ({
               ...hotspot,
               label:
+                hotspot.label ||
                 globalViewpointOptions.find((option) => option.viewpointId === hotspot.targetViewpointId)?.viewpointName ||
                 'View',
             }))}
             editing
             onAddHotspot={handleAddHotspot}
+            pendingHotspot={pendingHotspot}
           />
         </div>
       </div>

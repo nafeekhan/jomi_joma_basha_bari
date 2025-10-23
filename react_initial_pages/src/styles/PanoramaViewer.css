@@ -94,6 +94,13 @@
   background: rgba(56, 189, 248, 1);
 }
 
+.panorama-hotspot.pending {
+  background: rgba(251, 191, 36, 0.9);
+  color: #78350f;
+  box-shadow: 0 8px 20px rgba(120, 53, 15, 0.35);
+  pointer-events: none;
+}
+
 .panorama-hotspot-icon {
   font-size: 1rem;
 }

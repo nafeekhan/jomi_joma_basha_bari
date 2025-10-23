@@ -13,7 +13,9 @@ const buildHotspotsWithLabels = (rooms, hotspots = []) =>
     const target = findViewpointById(rooms, hotspot.targetViewpointId);
     return {
       ...hotspot,
-      label: target ? `${target.room.name.split(' ')[0]} → ${target.viewpoint.name}` : 'Navigate',
+      label:
+        hotspot.label ||
+        (target ? `${target.room.name.split(' ')[0]} → ${target.viewpoint.name}` : 'Navigate'),
     };
   });
 

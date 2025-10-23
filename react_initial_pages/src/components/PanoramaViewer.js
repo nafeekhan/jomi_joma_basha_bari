@@ -7,13 +7,6 @@ const DEGREE = 180 / Math.PI;
 const generateId = () => `hs-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`;
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
-const wrapAngle = (angle) => {
-  let a = angle;
-  while (a < -Math.PI) a += 2 * Math.PI;
-  while (a > Math.PI) a -= 2 * Math.PI;
-  return a;
-};
-
 const createSphereGeometry = (latBands = 40, lonBands = 80, radius = 1) => {
   const positions = [];
   const uvs = [];
@@ -216,6 +209,7 @@ const PanoramaViewer = ({
   onAddHotspot,
   editing = false,
   hotspotTooltipFormatter,
+  pendingHotspot = null,
 }) => {
   const containerRef = useRef(null);
   const canvasRef = useRef(null);
@@ -241,6 +235,7 @@ const PanoramaViewer = ({
   const [error, setError] = useState(null);
   const [loadingTexture, setLoadingTexture] = useState(false);
   const [hotspotPositions, setHotspotPositions] = useState([]);
+  const [pendingPosition, setPendingPosition] = useState(null);
 
   const hotspotsMemo = useMemo(() => hotspots || [], [hotspots]);
 
@@ -303,18 +298,18 @@ const PanoramaViewer = ({
     gl.viewport(0, 0, canvas.width, canvas.height);
   };
 
-  const recalculateHotspotPositions = useCallback(() => {
-    const canvas = canvasRef.current;
-    const gl = glRef.current;
-    const container = containerRef.current;
-    if (!canvas || !gl || !container) return [];
+  const projectHotspot = useCallback(
+    (hotspot) => {
+      const canvas = canvasRef.current;
+      const gl = glRef.current;
+      const container = containerRef.current;
+      if (!canvas || !gl || !container) return null;
 
-    const aspect = canvas.width / canvas.height;
-    const projection = createPerspectiveMatrix(fovRef.current, aspect, 0.1, 100.0);
-    const view = createViewMatrix(yawRef.current, pitchRef.current);
-    const matrix = multiplyMatrices(projection, view);
+      const aspect = canvas.width / canvas.height;
+      const projection = createPerspectiveMatrix(fovRef.current, aspect, 0.1, 100.0);
+      const view = createViewMatrix(yawRef.current, pitchRef.current);
+      const matrix = multiplyMatrices(projection, view);
 
-    const results = hotspotsMemo.map((hotspot) => {
       const vector = yawPitchToVector(hotspot.yaw, hotspot.pitch);
       const clip = transformVector(matrix, vector);
       const w = clip[3] || 1;
@@ -339,10 +334,28 @@ const PanoramaViewer = ({
         visible,
         hotspot,
       };
-    });
+    },
+    []
+  );
+
+  const recalculateHotspotPositions = useCallback(() => {
+    const canvas = canvasRef.current;
+    const gl = glRef.current;
+    const container = containerRef.current;
+    if (!canvas || !gl || !container) return [];
+
+    const results = hotspotsMemo
+      .map((hotspot) => projectHotspot(hotspot))
+      .filter(Boolean);
 
     setHotspotPositions(results);
-  }, [hotspotsMemo]);
+    if (editing && pendingHotspot) {
+      const projected = projectHotspot(pendingHotspot);
+      setPendingPosition(projected);
+    } else {
+      setPendingPosition(null);
+    }
+  }, [hotspotsMemo, editing, pendingHotspot, projectHotspot]);
 
   const renderScene = () => {
     const gl = glRef.current;
@@ -379,6 +392,18 @@ const PanoramaViewer = ({
   };
 
   const handlePointerDown = (event) => {
+    if (event.target && event.target.closest('.panorama-hotspot')) {
+      pointerStateRef.current = {
+        dragging: false,
+        lastX: event.clientX,
+        lastY: event.clientY,
+        startX: event.clientX,
+        startY: event.clientY,
+        moved: false,
+      };
+      return;
+    }
+
     const container = containerRef.current;
     if (!container) return;
     container.focus?.();
@@ -412,6 +437,48 @@ const PanoramaViewer = ({
     recalculateHotspotPositions();
   };
 
+  const screenPointToYawPitch = (clientX, clientY) => {
+    const container = containerRef.current;
+    const canvas = canvasRef.current;
+    if (!container || !canvas) return null;
+
+    const rect = container.getBoundingClientRect();
+    const xNdc = ((clientX - rect.left) / rect.width) * 2 - 1;
+    const yNdc = 1 - ((clientY - rect.top) / rect.height) * 2;
+
+    const aspect = canvas.width / canvas.height;
+    const tanHalfFov = Math.tan(fovRef.current / 2);
+
+    let dirCam = [
+      xNdc * tanHalfFov * aspect,
+      yNdc * tanHalfFov,
+      1,
+    ];
+
+    const length = Math.hypot(dirCam[0], dirCam[1], dirCam[2]);
+    dirCam = dirCam.map((value) => value / (length || 1));
+
+    const cosYaw = Math.cos(yawRef.current);
+    const sinYaw = Math.sin(yawRef.current);
+    const cosPitch = Math.cos(pitchRef.current);
+    const sinPitch = Math.sin(pitchRef.current);
+
+    const xAxis = [cosYaw, 0, -sinYaw];
+    const yAxis = [sinYaw * sinPitch, cosPitch, cosYaw * sinPitch];
+    const zAxis = [sinYaw * cosPitch, -sinPitch, cosPitch * cosYaw];
+
+    const worldX =
+      dirCam[0] * xAxis[0] + dirCam[1] * yAxis[0] + dirCam[2] * zAxis[0];
+    const worldY =
+      dirCam[0] * xAxis[1] + dirCam[1] * yAxis[1] + dirCam[2] * zAxis[1];
+    const worldZ =
+      dirCam[0] * xAxis[2] + dirCam[1] * yAxis[2] + dirCam[2] * zAxis[2];
+
+    const yaw = Math.atan2(worldX, worldZ);
+    const pitch = Math.asin(clamp(worldY, -1, 1));
+    return { yaw, pitch };
+  };
+
   const handlePointerUp = (event) => {
     const pointerState = pointerStateRef.current;
     if (!pointerState.dragging) return;
@@ -419,30 +486,10 @@ const PanoramaViewer = ({
     containerRef.current?.releasePointerCapture?.(event.pointerId);
 
     if (!pointerState.moved && editing && typeof onAddHotspot === 'function') {
-      const { clientX, clientY } = event;
-      const container = containerRef.current;
-      const canvas = canvasRef.current;
-      if (!container || !canvas) return;
-
-      const rect = container.getBoundingClientRect();
-      const offsetX = clientX - rect.left;
-      const offsetY = clientY - rect.top;
-
-      const aspect = canvas.width / canvas.height;
-      const horizontalFov = 2 * Math.atan(Math.tan(fovRef.current / 2) * aspect);
-      const verticalFov = fovRef.current;
-
-      const normalizedX = offsetX / rect.width;
-      const normalizedY = offsetY / rect.height;
-
-      const newYaw = wrapAngle(yawRef.current + (0.5 - normalizedX) * horizontalFov);
-      const newPitch = clamp(pitchRef.current + (0.5 - normalizedY) * verticalFov, -Math.PI / 2 + 0.01, Math.PI / 2 - 0.01);
-
-      onAddHotspot({
-        id: generateId(),
-        yaw: newYaw,
-        pitch: newPitch,
-      });
+      const result = screenPointToYawPitch(event.clientX, event.clientY);
+      if (result) {
+        onAddHotspot(result);
+      }
     }
   };
 
@@ -508,7 +555,7 @@ const PanoramaViewer = ({
 
   useEffect(() => {
     recalculateHotspotPositions();
-  }, [hotspotsMemo, recalculateHotspotPositions]);
+  }, [hotspotsMemo, pendingHotspot, recalculateHotspotPositions]);
   return (
     <div
       ref={containerRef}
@@ -534,6 +581,15 @@ const PanoramaViewer = ({
               <span>Loading panorama…</span>
             </>
           )}
+        </div>
+      )}
+
+      {editing && pendingPosition?.visible && (
+        <div
+          className="panorama-hotspot pending"
+          style={{ transform: `translate(-50%, -50%) translate(${pendingPosition.x}px, ${pendingPosition.y}px)` }}
+        >
+          <span className="panorama-hotspot-icon">?</span>
         </div>
       )}
 
