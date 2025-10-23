@@ -5,3 +5,8 @@ export const readFileAsDataUrl = (file) =>
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
+
+export const dataUrlToBlob = async (dataUrl) => {
+  const response = await fetch(dataUrl);
+  return response.blob();
+};

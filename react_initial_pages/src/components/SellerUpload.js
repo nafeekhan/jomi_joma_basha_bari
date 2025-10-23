@@ -1,15 +1,11 @@
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import { Tooltip } from 'react-tooltip';
 import RoomViewpointEditor from './RoomViewpointEditor';
 import HotspotEditor from './HotspotEditor';
-import {
-  createProperty,
-  savePropertyToStorage,
-  clearPropertyStorage,
-  loadPropertyFromStorage,
-  normaliseRooms,
-} from '../models/property';
+import { normaliseRooms } from '../models/property';
 import { extractCoverImage, SAMPLE_PROPERTY } from '../data/sampleProperty';
+import { apiPost, apiPut } from '../api/client';
+import { dataUrlToBlob } from '../utils/file';
 import '../styles/SellerUpload.css';
 
 const initialFormState = {
@@ -33,14 +29,9 @@ const SellerUpload = () => {
   const [currentStep, setCurrentStep] = useState(0);
   const [loading, setLoading] = useState(false);
 
-  const storedProperty = useMemo(() => loadPropertyFromStorage(), []);
+  const [formData, setFormData] = useState(initialFormState);
 
-  const [formData, setFormData] = useState(() => ({
-    ...initialFormState,
-    ...(storedProperty || {}),
-  }));
-
-  const [rooms, setRooms] = useState(() => normaliseRooms(storedProperty?.rooms || SAMPLE_PROPERTY.rooms));
+  const [rooms, setRooms] = useState(() => normaliseRooms(SAMPLE_PROPERTY.rooms));
   const [showResetConfirmation, setShowResetConfirmation] = useState(false);
 
   const handleInputChange = (event) => {
@@ -60,25 +51,135 @@ const SellerUpload = () => {
   };
 
   const handleSave = async () => {
+    const token = localStorage.getItem('authToken');
+    if (!token) {
+      alert('Please log in and store your auth token in localStorage under "authToken".');
+      return;
+    }
+
     setLoading(true);
     try {
-      const property = createProperty({
-        ...formData,
-        rooms: normaliseRooms(rooms),
-      });
-      savePropertyToStorage(property);
-      alert('Property saved! Open the Property Detail page to preview the virtual tour.');
+      const propertyPayload = {
+        title: formData.title,
+        description: formData.description,
+        property_type: formData.propertyType || 'buy',
+        price: Number(formData.price) || 0,
+        size_sqft: formData.sizeSqft ? Number(formData.sizeSqft) : null,
+        bedrooms: formData.bedrooms ? Number(formData.bedrooms) : null,
+        bathrooms: formData.bathrooms ? Number(formData.bathrooms) : null,
+        furnished: !!formData.furnished,
+        address_line: formData.addressLine,
+        city: formData.city,
+        state: formData.state,
+        country: formData.country,
+        postal_code: formData.postalCode,
+        tags: Array.isArray(formData.tags) ? formData.tags : [],
+      };
+
+      const propertyResponse = await apiPost('/api/properties', propertyPayload);
+      const propertyId = propertyResponse?.data?.property?.id;
+
+      if (!propertyId) {
+        throw new Error('Failed to create property');
+      }
+
+      const normalisedRooms = normaliseRooms(rooms);
+      const roomIdMap = new Map();
+      const viewpointIdMap = new Map();
+      const hotspotQueue = [];
+
+      for (let roomIndex = 0; roomIndex < normalisedRooms.length; roomIndex += 1) {
+        const room = normalisedRooms[roomIndex];
+        const roomResponse = await apiPost(`/api/rooms/properties/${propertyId}/rooms`, {
+          room_name: room.name,
+          room_order: roomIndex,
+        });
+
+        const roomId = roomResponse?.data?.room?.id;
+        if (!roomId) {
+          throw new Error(`Failed to create room: ${room.name}`);
+        }
+        roomIdMap.set(room.id, roomId);
+
+        let defaultSceneId = null;
+
+        for (let vpIndex = 0; vpIndex < room.viewpoints.length; vpIndex += 1) {
+          const viewpoint = room.viewpoints[vpIndex];
+          const blob = await dataUrlToBlob(viewpoint.panoramaDataUrl);
+
+          const form = new FormData();
+          form.append('scene_name', `${room.name} • ${viewpoint.name}`);
+          form.append('scene_order', vpIndex);
+          form.append('room_id', roomId);
+          form.append('viewpoint_name', viewpoint.name);
+          form.append('is_default_viewpoint', viewpoint.isDefault ? 'true' : 'false');
+          form.append('initial_view_yaw', viewpoint.initialViewYaw || 0);
+          form.append('initial_view_pitch', viewpoint.initialViewPitch || 0);
+          form.append('initial_view_fov', viewpoint.initialViewFov || 1.5708);
+          form.append('scene_images', blob, `${viewpoint.name.replace(/\s+/g, '_')}.jpg`);
+
+          const sceneResponse = await apiPost(
+            `/api/scenes/properties/${propertyId}/scenes`,
+            form
+          );
+
+          const sceneId = sceneResponse?.data?.scene?.id;
+          if (!sceneId) {
+            throw new Error(`Failed to create viewpoint: ${viewpoint.name}`);
+          }
+
+          viewpointIdMap.set(viewpoint.id, sceneId);
+
+          if (viewpoint.isDefault && !defaultSceneId) {
+            defaultSceneId = sceneId;
+          }
+
+          for (const hotspot of viewpoint.hotspots || []) {
+            hotspotQueue.push({
+              sourceSceneId: sceneId,
+              targetLocalId: hotspot.targetViewpointId,
+              yaw: hotspot.yaw,
+              pitch: hotspot.pitch,
+              title: hotspot.label || null,
+            });
+          }
+        }
+
+        if (defaultSceneId) {
+          await apiPut(`/api/rooms/${roomId}/default-viewpoint`, {
+            viewpoint_id: defaultSceneId,
+          });
+        }
+      }
+
+      for (const hotspot of hotspotQueue) {
+        const targetSceneId = viewpointIdMap.get(hotspot.targetLocalId);
+        if (!targetSceneId) {
+          console.warn('Unable to resolve hotspot target viewpoint', hotspot);
+          continue;
+        }
+
+        await apiPost(`/api/scenes/${hotspot.sourceSceneId}/hotspots`, {
+          hotspot_type: 'navigation',
+          target_scene_id: targetSceneId,
+          yaw: hotspot.yaw,
+          pitch: hotspot.pitch,
+          title: hotspot.title,
+        });
+      }
+
+      localStorage.setItem('jjbb_last_property_id', propertyId);
+      alert('Property uploaded successfully! You can now preview it on the Property Detail page.');
       setCurrentStep(0);
     } catch (error) {
-      console.error('Failed to save property', error);
-      alert('Failed to save property. Please try again.');
+      console.error('Failed to upload property', error);
+      alert(`Failed to upload property: ${error.message}`);
     } finally {
       setLoading(false);
     }
   };
 
   const handleReset = () => {
-    clearPropertyStorage();
     setRooms(normaliseRooms(SAMPLE_PROPERTY.rooms));
     setFormData(initialFormState);
     setShowResetConfirmation(false);

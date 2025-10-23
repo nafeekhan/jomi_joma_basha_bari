@@ -1,12 +1,88 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import PanoramaViewer from './PanoramaViewer';
-import {
-  loadPropertyFromStorage,
-  normaliseRooms,
-  findViewpointById,
-} from '../models/property';
 import { SAMPLE_PROPERTY, extractCoverImage } from '../data/sampleProperty';
+import { apiGet } from '../api/client';
 import '../styles/PropertyDetail.css';
+
+const mapSampleProperty = (sample) => ({
+  id: sample.id,
+  title: sample.title,
+  description: sample.description,
+  propertyType: sample.propertyType,
+  price: sample.price,
+  bedrooms: sample.bedrooms,
+  bathrooms: sample.bathrooms,
+  sizeSqft: sample.sizeSqft,
+  furnished: sample.furnished,
+  addressLine: sample.addressLine,
+  city: sample.city,
+  state: sample.state,
+  country: sample.country,
+  postalCode: sample.postalCode,
+  tags: sample.tags,
+  rooms: sample.rooms.map((room) => ({
+    id: room.id,
+    name: room.name,
+    defaultViewpointId: room.defaultViewpointId,
+    viewpoints: room.viewpoints.map((vp) => ({
+      id: vp.id,
+      name: vp.name,
+      panoramaDataUrl: vp.panoramaDataUrl,
+      preview_image_url: vp.panoramaDataUrl,
+      isDefault: vp.isDefault,
+      hotspots: vp.hotspots || [],
+    })),
+  })),
+});
+
+const mapBackendProperty = (property) => ({
+  id: property.id,
+  title: property.title,
+  description: property.description,
+  propertyType: property.property_type,
+  price: Number(property.price) || 0,
+  bedrooms: property.bedrooms,
+  bathrooms: property.bathrooms,
+  sizeSqft: property.size_sqft,
+  furnished: property.furnished,
+  addressLine: property.address_line,
+  city: property.city,
+  state: property.state,
+  country: property.country,
+  postalCode: property.postal_code,
+  tags: property.tags || [],
+  sellerName: property.seller_name,
+  sellerEmail: property.seller_email,
+  rooms: (property.rooms || []).map((room) => ({
+    id: room.id,
+    name: room.room_name,
+    defaultViewpointId: room.default_viewpoint_id,
+    viewpoints: (room.viewpoints || []).map((viewpoint) => ({
+      id: viewpoint.id,
+      name: viewpoint.viewpoint_name || viewpoint.scene_name,
+      panoramaDataUrl: viewpoint.preview_image_url,
+      preview_image_url: viewpoint.preview_image_url,
+      isDefault: viewpoint.is_default_viewpoint,
+      hotspots: (viewpoint.hotspots || []).map((hotspot) => ({
+        id: hotspot.id,
+        yaw: hotspot.yaw,
+        pitch: hotspot.pitch,
+        targetViewpointId: hotspot.target_scene_id,
+        label: hotspot.title,
+      })),
+    })),
+  })),
+});
+
+const findViewpointById = (rooms, viewpointId) => {
+  for (const room of rooms || []) {
+    const match = room.viewpoints?.find((vp) => vp.id === viewpointId);
+    if (match) {
+      return { room, viewpoint: match };
+    }
+  }
+  return null;
+};
 
 const buildHotspotsWithLabels = (rooms, hotspots = []) =>
   hotspots.map((hotspot) => {
@@ -28,24 +104,48 @@ const PropertyDetail = () => {
   const [currentViewpointId, setCurrentViewpointId] = useState(null);
 
   useEffect(() => {
-    try {
-      const stored = loadPropertyFromStorage();
-      const baseProperty = stored ? { ...stored } : { ...SAMPLE_PROPERTY };
-      baseProperty.rooms = normaliseRooms(baseProperty.rooms || []);
-      setProperty(baseProperty);
+    const fetchProperty = async () => {
+      try {
+        setLoading(true);
+        const params = new URLSearchParams(window.location.search);
+        const queryId = params.get('propertyId');
+        const storedId = localStorage.getItem('jjbb_last_property_id');
+        const targetId = queryId || storedId;
 
-      const firstRoom = baseProperty.rooms[0];
-      if (firstRoom) {
-        setCurrentRoomId(firstRoom.id);
-        setCurrentViewpointId(firstRoom.defaultViewpointId || firstRoom.viewpoints?.[0]?.id || null);
+        if (targetId) {
+          const response = await apiGet(`/api/properties/${targetId}`);
+          const propertyData = response?.data?.property;
+          if (propertyData) {
+            setProperty(mapBackendProperty(propertyData));
+            localStorage.setItem('jjbb_last_property_id', targetId);
+            setError(null);
+            return;
+          }
+        }
+
+        setProperty(mapSampleProperty(SAMPLE_PROPERTY));
+        setError(null);
+      } catch (err) {
+        console.error('Failed to load property details', err);
+        setError('Unable to load property from the server. Showing demo property instead.');
+        setProperty(mapSampleProperty(SAMPLE_PROPERTY));
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
-    } catch (err) {
-      console.error(err);
-      setError('Failed to load property details');
-      setLoading(false);
-    }
+    };
+
+    fetchProperty();
   }, []);
+
+  useEffect(() => {
+    if (!property?.rooms?.length) return;
+    const firstRoom = property.rooms[0];
+    const firstViewpoint =
+      firstRoom.viewpoints.find((vp) => vp.id === firstRoom.defaultViewpointId) ||
+      firstRoom.viewpoints[0];
+    setCurrentRoomId(firstRoom.id);
+    setCurrentViewpointId(firstViewpoint?.id || null);
+  }, [property]);
 
   const rooms = useMemo(() => property?.rooms || [], [property]);
 
@@ -57,7 +157,10 @@ const PropertyDetail = () => {
   const currentViewpoint = useMemo(() => {
     if (!currentRoom) return null;
     const fallbackId = currentRoom.defaultViewpointId || currentRoom.viewpoints?.[0]?.id;
-    return currentRoom.viewpoints?.find((viewpoint) => viewpoint.id === (currentViewpointId || fallbackId)) || null;
+    return (
+      currentRoom.viewpoints?.find((viewpoint) => viewpoint.id === (currentViewpointId || fallbackId)) ||
+      null
+    );
   }, [currentRoom, currentViewpointId]);
 
   const handleSelectRoom = (roomId) => {
@@ -89,13 +192,17 @@ const PropertyDetail = () => {
     );
   }
 
-  if (error || !property) {
+  if (error && !property) {
     return (
       <div className="error-container">
         <h2>⚠️ Error</h2>
-        <p>{error || 'Property not available.'}</p>
+        <p>{error}</p>
       </div>
     );
+  }
+
+  if (!property) {
+    return null;
   }
 
   const coverImage = extractCoverImage(property);

@@ -102,5 +102,9 @@ export const extractCoverImage = (property) => {
   const firstViewpoint =
     firstRoom?.viewpoints?.find((vp) => vp.id === firstRoom?.defaultViewpointId) ||
     firstRoom?.viewpoints?.[0];
-  return firstViewpoint?.panoramaDataUrl || baseImage('/test_360_images/living-room.jpg');
+  return (
+    firstViewpoint?.panoramaDataUrl ||
+    firstViewpoint?.preview_image_url ||
+    baseImage('/test_360_images/living-room.jpg')
+  );
 };

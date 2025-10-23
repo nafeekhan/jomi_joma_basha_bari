@@ -1,5 +1,3 @@
-export const STORAGE_KEY = 'jjbb_property_draft';
-
 const generateId = () => {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
     return crypto.randomUUID();
@@ -35,66 +33,6 @@ export const createRoom = ({ id, name, order = 0, viewpoints = [], defaultViewpo
   defaultViewpointId,
   viewpoints,
 });
-
-export const createProperty = ({
-  id = 'demo-property',
-  title = '',
-  description = '',
-  propertyType = 'buy',
-  price = '',
-  bedrooms = '',
-  bathrooms = '',
-  sizeSqft = '',
-  furnished = false,
-  addressLine = '',
-  city = '',
-  state = '',
-  country = '',
-  postalCode = '',
-  tags = [],
-  rooms = [],
-}) => ({
-  id,
-  title,
-  description,
-  propertyType,
-  price,
-  bedrooms,
-  bathrooms,
-  sizeSqft,
-  furnished,
-  addressLine,
-  city,
-  state,
-  country,
-  postalCode,
-  tags,
-  rooms,
-});
-
-export const savePropertyToStorage = (property) => {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(property));
-  } catch (error) {
-    console.error('Failed to save property to storage', error);
-  }
-};
-
-export const loadPropertyFromStorage = () => {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    return parsed;
-  } catch (error) {
-    console.error('Failed to load property from storage', error);
-    return null;
-  }
-};
-
-export const clearPropertyStorage = () => {
-  localStorage.removeItem(STORAGE_KEY);
-};
 
 export const findViewpointById = (rooms, viewpointId) => {
   for (const room of rooms || []) {
