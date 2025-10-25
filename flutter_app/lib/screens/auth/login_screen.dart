@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:get/get.dart';
+
 import '../../services/auth_service.dart';
 import '../../config/app_theme.dart';
-import '../../models/user.dart';
 
 /// Login Screen
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({Key? key}) : super(key: key);
+  const LoginScreen({super.key});
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -34,7 +35,7 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isLoading = true);
 
     try {
-      final authResponse = await _authService.login(
+      await _authService.login(
         email: _emailController.text.trim(),
         password: _passwordController.text,
       );
@@ -42,7 +43,7 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!mounted) return;
 
       // Navigate to home based on user type
-      Navigator.pushReplacementNamed(context, '/home', arguments: authResponse.user);
+      Get.offAllNamed('/home');
     } catch (e) {
       if (!mounted) return;
       
@@ -138,7 +139,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   const SizedBox(height: 16),
                   
                   TextButton(
-                    onPressed: () => Navigator.pushNamed(context, '/register'),
+                    onPressed: () => Get.toNamed('/register'),
                     child: const Text("Don't have an account? Register"),
                   ),
                 ],
@@ -150,4 +151,3 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 }
-

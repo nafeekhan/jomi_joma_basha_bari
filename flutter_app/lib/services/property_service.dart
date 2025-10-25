@@ -1,7 +1,9 @@
-import 'dart:io';
-import 'package:http/http.dart' as http;
 import '../models/property.dart';
+import '../models/property_tag.dart';
+import '../models/search_filter.dart';
+import '../models/vendor.dart';
 import '../config/api_config.dart';
+import '../utils/dummy_data.dart';
 import 'api_service.dart';
 
 /// Property Service
@@ -12,43 +14,16 @@ class PropertyService {
 
   /// Get all properties with filters
   Future<List<Property>> getProperties({
-    String? search,
-    PropertyType? propertyType,
-    double? minPrice,
-    double? maxPrice,
-    double? minSize,
-    double? maxSize,
-    int? bedrooms,
-    int? bathrooms,
-    bool? furnished,
-    List<String>? tags,
-    double? latitude,
-    double? longitude,
-    double? radius,
-    String? sortBy,
+    SearchFilter? filter,
     int page = 1,
     int limit = 20,
   }) async {
     try {
-      final queryParams = <String, String>{
-        'page': page.toString(),
-        'limit': limit.toString(),
-      };
-
-      if (search != null) queryParams['search'] = search;
-      if (propertyType != null) queryParams['property_type'] = propertyType.name;
-      if (minPrice != null) queryParams['min_price'] = minPrice.toString();
-      if (maxPrice != null) queryParams['max_price'] = maxPrice.toString();
-      if (minSize != null) queryParams['min_size'] = minSize.toString();
-      if (maxSize != null) queryParams['max_size'] = maxSize.toString();
-      if (bedrooms != null) queryParams['bedrooms'] = bedrooms.toString();
-      if (bathrooms != null) queryParams['bathrooms'] = bathrooms.toString();
-      if (furnished != null) queryParams['furnished'] = furnished.toString();
-      if (tags != null && tags.isNotEmpty) queryParams['tags'] = tags.join(',');
-      if (latitude != null) queryParams['latitude'] = latitude.toString();
-      if (longitude != null) queryParams['longitude'] = longitude.toString();
-      if (radius != null) queryParams['radius'] = radius.toString();
-      if (sortBy != null) queryParams['sort_by'] = sortBy;
+      final queryParams = filter?.toQueryParameters(page: page, limit: limit) ??
+          {
+            'page': page.toString(),
+            'limit': limit.toString(),
+          };
 
       final response = await _apiService.get(
         ApiConfig.properties,
@@ -65,8 +40,12 @@ class PropertyService {
         throw ApiException(response['message'] as String? ?? 'Failed to fetch properties');
       }
     } catch (e) {
-      if (e is ApiException) rethrow;
-      throw ApiException('Get properties error: $e');
+      final fallbackFilter = filter ?? const SearchFilter();
+      final fallback = DummyData.filterProperties(fallbackFilter);
+      if (fallback.isNotEmpty) {
+        return fallback.take(limit).toList();
+      }
+      return DummyData.properties.take(limit).toList();
     }
   }
 
@@ -82,6 +61,11 @@ class PropertyService {
         throw ApiException(response['message'] as String? ?? 'Failed to fetch property');
       }
     } catch (e) {
+      for (final property in DummyData.properties) {
+        if (property.id == id) {
+          return property;
+        }
+      }
       if (e is ApiException) rethrow;
       throw ApiException('Get property error: $e');
     }
@@ -184,8 +168,77 @@ class PropertyService {
     }
   }
 
+  /// Fetch available property tags with counts
+  Future<List<PropertyTag>> getPropertyTags({String? search}) async {
+    try {
+      final response = await _apiService.get(
+        ApiConfig.propertyTags,
+        queryParameters: {
+          if (search != null && search.isNotEmpty) 'search': search,
+        },
+      );
+
+      if (response['success'] == true && response['data'] != null) {
+        final tags = response['data']['tags'] as List<dynamic>;
+        return tags
+            .map((tag) => PropertyTag.fromJson(tag as Map<String, dynamic>))
+            .toList();
+      } else {
+        throw ApiException(response['message'] as String? ?? 'Failed to fetch tags');
+      }
+    } catch (e) {
+      final lower = search?.toLowerCase() ?? '';
+      final fallback = lower.isEmpty
+          ? DummyData.tags
+          : DummyData.tags
+              .where((tag) => tag.name.toLowerCase().contains(lower))
+              .toList();
+      if (fallback.isNotEmpty) {
+        return fallback;
+      }
+      if (e is ApiException) rethrow;
+      throw ApiException('Get tags error: $e');
+    }
+  }
+
+  /// Fetch vendor (seller) leaderboard
+  Future<List<Vendor>> getVendors({String? search}) async {
+    try {
+      final response = await _apiService.get(
+        ApiConfig.propertyVendors,
+        queryParameters: {
+          if (search != null && search.isNotEmpty) 'search': search,
+        },
+      );
+
+      if (response['success'] == true && response['data'] != null) {
+        final vendors = response['data']['vendors'] as List<dynamic>;
+        return vendors
+            .map((vendor) => Vendor.fromJson(vendor as Map<String, dynamic>))
+            .toList();
+      } else {
+        throw ApiException(response['message'] as String? ?? 'Failed to fetch vendors');
+      }
+    } catch (e) {
+      final lower = search?.toLowerCase() ?? '';
+      final fallback = lower.isEmpty
+          ? DummyData.vendors
+          : DummyData.vendors
+              .where((vendor) =>
+                  vendor.fullName.toLowerCase().contains(lower) ||
+                  (vendor.companyName ?? '')
+                      .toLowerCase()
+                      .contains(lower))
+              .toList();
+      if (fallback.isNotEmpty) {
+        return fallback;
+      }
+      if (e is ApiException) rethrow;
+      throw ApiException('Get vendors error: $e');
+    }
+  }
+
   void dispose() {
     _apiService.dispose();
   }
 }
-

@@ -1,8 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:tutorial_coach_mark/tutorial_coach_mark.dart';
-import 'package:super_tooltip/super_tooltip.dart';
 import '../../models/property.dart';
 import '../../models/scene.dart';
 import '../../services/property_service.dart';
@@ -16,7 +14,7 @@ import 'widgets/hotspot_editor.dart';
 /// Seller page to upload properties with 360° images
 /// Includes tooltips, hints, and guided help
 class PropertyUploadScreen extends StatefulWidget {
-  const PropertyUploadScreen({Key? key}) : super(key: key);
+  const PropertyUploadScreen({super.key});
 
   @override
   State<PropertyUploadScreen> createState() => _PropertyUploadScreenState();
@@ -26,7 +24,6 @@ class _PropertyUploadScreenState extends State<PropertyUploadScreen> {
   final _formKey = GlobalKey<FormState>();
   final PropertyService _propertyService = PropertyService();
   final SceneService _sceneService = SceneService();
-  final ImagePicker _imagePicker = ImagePicker();
 
   // Tutorial coach marks
   late TutorialCoachMark tutorialCoachMark;
@@ -48,8 +45,6 @@ class _PropertyUploadScreenState extends State<PropertyUploadScreen> {
   // Form state
   PropertyType _propertyType = PropertyType.buy;
   bool _furnished = false;
-  List<String> _tags = [];
-  final List<File> _propertyImages = [];
   
   // 360 Tour scenes
   final List<SceneUploadData> _scenes = [];
@@ -169,13 +164,6 @@ class _PropertyUploadScreenState extends State<PropertyUploadScreen> {
     });
   }
 
-  Future<void> _pickPropertyImages() async {
-    final List<XFile> images = await _imagePicker.pickMultiImage();
-    setState(() {
-      _propertyImages.addAll(images.map((xfile) => File(xfile.path)));
-    });
-  }
-
   void _addScene() {
     setState(() {
       _scenes.add(SceneUploadData(
@@ -230,19 +218,26 @@ class _PropertyUploadScreenState extends State<PropertyUploadScreen> {
         state: _stateController.text.isNotEmpty ? _stateController.text : null,
         country: _countryController.text,
         postalCode: _postalCodeController.text.isNotEmpty ? _postalCodeController.text : null,
-        tags: _tags.isNotEmpty ? _tags : null,
       );
 
       // Step 2: Upload scenes
+      final Map<String, Scene> createdScenes = {};
+
       for (final sceneData in _scenes) {
         if (sceneData.images.isNotEmpty) {
-          await _sceneService.createScene(
+          final createdScene = await _sceneService.createScene(
             propertyId: property.id,
             sceneName: sceneData.name,
             sceneOrder: sceneData.order,
             images: sceneData.images,
           );
+          createdScenes[sceneData.name] = createdScene;
         }
+      }
+
+      // Step 3: Persist hotspots (navigation links) if any
+      if (_sceneHotspots.isNotEmpty) {
+        await _createHotspotsForScenes(createdScenes);
       }
 
       if (!mounted) return;
@@ -270,6 +265,50 @@ class _PropertyUploadScreenState extends State<PropertyUploadScreen> {
           _isLoading = false;
         });
       }
+    }
+  }
+
+  Future<void> _createHotspotsForScenes(Map<String, Scene> createdScenes) async {
+    if (createdScenes.isEmpty) return;
+
+    int skippedHotspots = 0;
+
+    for (final entry in _sceneHotspots.entries) {
+      final hostScene = createdScenes[entry.key];
+      if (hostScene == null) {
+        skippedHotspots += entry.value.length;
+        continue;
+      }
+
+      for (final hotspot in entry.value) {
+        final targetScene = createdScenes[hotspot.targetSceneId];
+        if (targetScene == null) {
+          skippedHotspots += 1;
+          continue;
+        }
+
+        try {
+          await _sceneService.createHotspot(
+            sceneId: hostScene.id,
+            hotspotType: HotspotType.navigation,
+            targetSceneId: targetScene.id,
+            yaw: hotspot.yaw,
+            pitch: hotspot.pitch,
+            title: hotspot.title,
+          );
+        } catch (_) {
+          skippedHotspots += 1;
+        }
+      }
+    }
+
+    if (skippedHotspots > 0 && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('$skippedHotspots hotspot(s) could not be linked. Please review after upload.'),
+          backgroundColor: AppTheme.warningColor,
+        ),
+      );
     }
   }
 
@@ -367,7 +406,7 @@ class _PropertyUploadScreenState extends State<PropertyUploadScreen> {
               child: InfoTooltip(
                 message: 'Select whether this property is for sale or rent',
                 child: DropdownButtonFormField<PropertyType>(
-                  value: _propertyType,
+                  initialValue: _propertyType,
                   decoration: const InputDecoration(
                     labelText: 'Type *',
                     prefixIcon: Icon(Icons.category),
@@ -554,9 +593,9 @@ class _PropertyUploadScreenState extends State<PropertyUploadScreen> {
           key: _tourKey,
           padding: const EdgeInsets.all(AppTheme.spacingM),
           decoration: BoxDecoration(
-            color: AppTheme.infoColor.withOpacity(0.1),
+            color: AppTheme.infoColor.withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(AppTheme.radiusM),
-            border: Border.all(color: AppTheme.infoColor.withOpacity(0.3)),
+            border: Border.all(color: AppTheme.infoColor.withValues(alpha: 0.3)),
           ),
           child: Row(
             children: [
@@ -626,8 +665,8 @@ class _PropertyUploadScreenState extends State<PropertyUploadScreen> {
           decoration: BoxDecoration(
             gradient: LinearGradient(
               colors: [
-                const Color(0xFF667EEA).withOpacity(0.1),
-                const Color(0xFF764BA2).withOpacity(0.1),
+                const Color(0xFF667EEA).withValues(alpha: 0.1),
+                const Color(0xFF764BA2).withValues(alpha: 0.1),
               ],
             ),
             borderRadius: BorderRadius.circular(12),
@@ -712,7 +751,7 @@ class _PropertyUploadScreenState extends State<PropertyUploadScreen> {
                 });
               },
             );
-          }).toList(),
+          }),
 
         if (_scenes.length < 2)
           Container(
@@ -767,7 +806,7 @@ class _PropertyUploadScreenState extends State<PropertyUploadScreen> {
                 ),
               ),
             );
-          }).toList(),
+          }),
         
         const SizedBox(height: AppTheme.spacingL),
 

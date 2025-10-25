@@ -261,6 +261,21 @@ class Property extends Equatable {
     return '\$${price.toStringAsFixed(0)}';
   }
 
+  /// Returns the cover image if marked, otherwise the first image.
+  PropertyImage? get coverImage {
+    final imageList = images;
+    if (imageList == null || imageList.isEmpty) return null;
+
+    try {
+      return imageList.firstWhere((image) => image.isCover);
+    } catch (_) {
+      return imageList.first;
+    }
+  }
+
+  /// Relative URL for the cover image if available.
+  String? get coverImageUrl => coverImage?.imageUrl;
+
   @override
   List<Object?> get props => [
         id,
@@ -289,4 +304,3 @@ class Property extends Equatable {
         updatedAt,
       ];
 }
-

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
+import '../../../config/app_theme.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../../../config/api_config.dart';
-import '../../../config/app_theme.dart';
 
 /// Virtual Tour Viewer - PRIORITY 1
 /// Displays 360° virtual tour using Marzipano in WebView
@@ -9,11 +9,11 @@ class VirtualTourViewer extends StatefulWidget {
   final String propertyId;
   final String propertyTitle;
 
-  const VirtualTourViewer({
-    Key? key,
+  const VirtualTourViewer.remote({
+    super.key,
     required this.propertyId,
     required this.propertyTitle,
-  }) : super(key: key);
+  });
 
   @override
   State<VirtualTourViewer> createState() => _VirtualTourViewerState();
@@ -31,45 +31,29 @@ class _VirtualTourViewerState extends State<VirtualTourViewer> {
   }
 
   void _initializeWebView() {
-    final viewerUrl = ApiConfig.viewerUrl(widget.propertyId);
-
     _webViewController = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(Colors.black)
       ..setNavigationDelegate(
         NavigationDelegate(
-          onPageStarted: (String url) {
-            setState(() {
-              _isLoading = true;
-              _error = null;
-            });
-          },
-          onPageFinished: (String url) {
-            setState(() {
-              _isLoading = false;
-            });
-          },
+          onPageStarted: (_) => setState(() {
+            _isLoading = true;
+            _error = null;
+          }),
+          onPageFinished: (_) => setState(() {
+            _isLoading = false;
+          }),
           onWebResourceError: (WebResourceError error) {
             setState(() {
               _isLoading = false;
               _error = 'Failed to load 360° tour: ${error.description}';
             });
           },
-          onNavigationRequest: (NavigationRequest request) {
-            // Allow all navigation within the viewer
-            return NavigationDecision.navigate;
-          },
         ),
-      )
-      ..addJavaScriptChannel(
-        'FlutterChannel',
-        onMessageReceived: (JavaScriptMessage message) {
-          // Handle messages from the WebView (Marzipano viewer)
-          debugPrint('Message from WebView: ${message.message}');
-          // You can add custom handlers here for events from the viewer
-        },
-      )
-      ..loadRequest(Uri.parse(viewerUrl));
+      );
+
+    final viewerUrl = ApiConfig.viewerUrl(widget.propertyId);
+    _webViewController.loadRequest(Uri.parse(viewerUrl));
   }
 
   @override
@@ -182,15 +166,16 @@ class _VirtualTourViewerState extends State<VirtualTourViewer> {
       bottomNavigationBar: _buildControlsInfo(),
     );
   }
+}
 
   Widget _buildControlsInfo() {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.8),
+        color: Colors.black.withValues(alpha: 0.8),
         border: Border(
           top: BorderSide(
-            color: AppTheme.primaryColor.withOpacity(0.3),
+            color: AppTheme.primaryColor.withValues(alpha: 0.3),
             width: 1,
           ),
         ),
@@ -223,6 +208,3 @@ class _VirtualTourViewerState extends State<VirtualTourViewer> {
       ],
     );
   }
-}
-
-

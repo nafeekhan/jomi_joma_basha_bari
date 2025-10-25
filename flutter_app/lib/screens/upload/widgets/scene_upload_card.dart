@@ -14,13 +14,13 @@ class SceneUploadCard extends StatefulWidget {
   final Function(SceneUploadData) onUpdate;
 
   const SceneUploadCard({
-    Key? key,
+    super.key,
     required this.scene,
     required this.index,
     required this.totalScenes,
     required this.onRemove,
     required this.onUpdate,
-  }) : super(key: key);
+  });
 
   @override
   State<SceneUploadCard> createState() => _SceneUploadCardState();
@@ -138,10 +138,10 @@ class _SceneUploadCardState extends State<SceneUploadCard> {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: AppTheme.warningColor.withOpacity(0.1),
+                color: AppTheme.warningColor.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(AppTheme.radiusM),
                 border: Border.all(
-                  color: AppTheme.warningColor.withOpacity(0.3),
+                  color: AppTheme.warningColor.withValues(alpha: 0.3),
                 ),
               ),
               child: Row(
@@ -252,4 +252,3 @@ class _SceneUploadCardState extends State<SceneUploadCard> {
     );
   }
 }
-

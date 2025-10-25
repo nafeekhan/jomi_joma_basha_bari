@@ -13,9 +13,9 @@ class HotspotPanoramaViewer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final imageUrl = scene.previewImageUrl ?? scene.imagePaths.firstOrNull;
+    final imagePath = scene.previewImageUrl ?? scene.imagePaths.firstOrNull;
 
-    if (imageUrl == null || imageUrl.isEmpty) {
+    if (imagePath == null || imagePath.isEmpty) {
       return Container(
         decoration: BoxDecoration(
           color: Colors.grey.shade200,
@@ -68,20 +68,17 @@ class HotspotPanoramaViewer extends StatelessWidget {
                 ),
               );
             }).toList(),
-            child: Image.network(
-              imageUrl,
-              fit: BoxFit.cover,
-            ),
+            child: _buildPanoramaImage(imagePath),
           ),
           Positioned(
             left: 16,
             bottom: 16,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0.55),
-                borderRadius: BorderRadius.circular(999),
-              ),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.55),
+                  borderRadius: BorderRadius.circular(999),
+                ),
               child: const Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -98,6 +95,13 @@ class HotspotPanoramaViewer extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  Image _buildPanoramaImage(String path) {
+    if (path.startsWith('http://') || path.startsWith('https://')) {
+      return Image.network(path, fit: BoxFit.cover);
+    }
+    return Image.asset(path, fit: BoxFit.cover);
   }
 
   double _radiansToDegrees(double radians) => radians * 180 / math.pi;

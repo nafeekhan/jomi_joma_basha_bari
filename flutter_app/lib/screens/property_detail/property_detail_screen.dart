@@ -9,6 +9,8 @@ import '../../services/property_service.dart';
 import '../../services/scene_service.dart';
 import '../../config/app_theme.dart';
 import '../../config/api_config.dart';
+import '../../utils/dummy_data.dart';
+import 'widgets/local_virtual_tour_page.dart';
 import 'widgets/virtual_tour_viewer.dart';
 import 'package:carousel_slider/carousel_slider.dart';
 
@@ -16,11 +18,13 @@ import 'package:carousel_slider/carousel_slider.dart';
 /// Displays property details with 360° virtual tour using Marzipano in WebView
 class PropertyDetailScreen extends StatefulWidget {
   final String propertyId;
+  final Property? initialProperty;
 
   const PropertyDetailScreen({
-    Key? key,
+    super.key,
     required this.propertyId,
-  }) : super(key: key);
+    this.initialProperty,
+  });
 
   @override
   State<PropertyDetailScreen> createState() => _PropertyDetailScreenState();
@@ -35,8 +39,6 @@ class _PropertyDetailScreenState extends State<PropertyDetailScreen>
   List<Scene> _scenes = [];
   bool _isLoading = true;
   String? _error;
-  bool _show360Tour = false;
-
   late TabController _tabController;
 
   @override
@@ -55,14 +57,33 @@ class _PropertyDetailScreenState extends State<PropertyDetailScreen>
   }
 
   Future<void> _loadPropertyDetails() async {
+    if (DummyData.isDummyPropertyId(widget.propertyId)) {
+      final property = DummyData.findPropertyById(widget.propertyId) ?? widget.initialProperty;
+      setState(() {
+        _property = property;
+        _scenes = DummyData.scenesForProperty(widget.propertyId);
+        _isLoading = false;
+      });
+      return;
+    }
+
     try {
       setState(() {
         _isLoading = true;
         _error = null;
       });
 
-      final property = await _propertyService.getPropertyById(widget.propertyId);
-      final scenes = await _sceneService.getPropertyScenes(widget.propertyId);
+      final property = widget.initialProperty ??
+          await _propertyService.getPropertyById(widget.propertyId);
+      List<Scene> scenes = [];
+
+      if (widget.initialProperty == null) {
+        try {
+          scenes = await _sceneService.getPropertyScenes(widget.propertyId);
+        } catch (_) {
+          scenes = const [];
+        }
+      }
 
       setState(() {
         _property = property;
@@ -70,10 +91,18 @@ class _PropertyDetailScreenState extends State<PropertyDetailScreen>
         _isLoading = false;
       });
     } catch (e) {
-      setState(() {
-        _error = e.toString();
-        _isLoading = false;
-      });
+      if (widget.initialProperty != null) {
+        setState(() {
+          _property = widget.initialProperty;
+          _scenes = const [];
+          _isLoading = false;
+        });
+      } else {
+        setState(() {
+          _error = e.toString();
+          _isLoading = false;
+        });
+      }
     }
   }
 
@@ -147,7 +176,8 @@ class _PropertyDetailScreenState extends State<PropertyDetailScreen>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _buildImageGallery(),
-                if (_scenes.isNotEmpty) _build360TourButton(),
+                if (DummyData.isDummyPropertyId(_property!.id) || _scenes.isNotEmpty)
+                  _build360TourButton(),
                 _buildPriceSection(),
                 _buildBasicInfo(),
                 _buildTabs(),
@@ -198,23 +228,27 @@ class _PropertyDetailScreenState extends State<PropertyDetailScreen>
       );
     }
 
-    return CarouselSlider(
-      options: CarouselOptions(
-        height: 300,
-        viewportFraction: 1.0,
-        enableInfiniteScroll: images.length > 1,
+    return GestureDetector(
+      onTap: _openVirtualTour,
+      child: CarouselSlider(
+        options: CarouselOptions(
+          height: 300,
+          viewportFraction: 1.0,
+          enableInfiniteScroll: images.length > 1,
+        ),
+        items: images.map((img) {
+          final imageUrl = _resolveImageUrl(img.imageUrl);
+          return CachedNetworkImage(
+            imageUrl: imageUrl,
+            fit: BoxFit.cover,
+            width: double.infinity,
+            placeholder: (context, url) => const Center(
+              child: CircularProgressIndicator(),
+            ),
+            errorWidget: (context, url, error) => const Icon(Icons.error),
+          );
+        }).toList(),
       ),
-      items: images.map((img) {
-        return CachedNetworkImage(
-          imageUrl: '${ApiConfig.baseUrl}/${img.imageUrl}',
-          fit: BoxFit.cover,
-          width: double.infinity,
-          placeholder: (context, url) => const Center(
-            child: CircularProgressIndicator(),
-          ),
-          errorWidget: (context, url, error) => const Icon(Icons.error),
-        );
-      }).toList(),
     );
   }
 
@@ -222,17 +256,7 @@ class _PropertyDetailScreenState extends State<PropertyDetailScreen>
     return Container(
       margin: const EdgeInsets.all(AppTheme.spacingM),
       child: ElevatedButton.icon(
-        onPressed: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => VirtualTourViewer(
-                propertyId: widget.propertyId,
-                propertyTitle: _property!.title,
-              ),
-            ),
-          );
-        },
+        onPressed: _openVirtualTour,
         icon: const Icon(Icons.view_in_ar, size: 28),
         label: const Text('View 360° Virtual Tour'),
         style: ElevatedButton.styleFrom(
@@ -272,7 +296,7 @@ class _PropertyDetailScreenState extends State<PropertyDetailScreen>
               vertical: 6,
             ),
             decoration: BoxDecoration(
-              color: AppTheme.successColor.withOpacity(0.1),
+              color: AppTheme.successColor.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(8),
             ),
             child: Row(
@@ -327,7 +351,7 @@ class _PropertyDetailScreenState extends State<PropertyDetailScreen>
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: AppTheme.primaryColor.withOpacity(0.1),
+        color: AppTheme.primaryColor.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Row(
@@ -420,7 +444,7 @@ class _PropertyDetailScreenState extends State<PropertyDetailScreen>
   Widget _buildFeatureChip(String label) {
     return Chip(
       label: Text(label),
-      backgroundColor: AppTheme.primaryColor.withOpacity(0.1),
+      backgroundColor: AppTheme.primaryColor.withValues(alpha: 0.1),
       labelStyle: const TextStyle(color: AppTheme.primaryColor),
     );
   }
@@ -527,7 +551,7 @@ class _PropertyDetailScreenState extends State<PropertyDetailScreen>
         color: Colors.white,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.1),
+            color: Colors.black.withValues(alpha: 0.1),
             blurRadius: 10,
             offset: const Offset(0, -2),
           ),
@@ -582,5 +606,40 @@ class _PropertyDetailScreenState extends State<PropertyDetailScreen>
       return '${date.day}/${date.month}/${date.year}';
     }
   }
-}
 
+  void _openVirtualTour() {
+    if (_property == null) return;
+
+    final isDummy = DummyData.isDummyPropertyId(_property!.id);
+    if (isDummy) {
+      final scenes = DummyData.scenesForProperty(_property!.id);
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => LocalVirtualTourPage(
+            propertyTitle: _property!.title,
+            scenes: scenes,
+          ),
+        ),
+      );
+    } else {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => VirtualTourViewer.remote(
+            propertyId: widget.propertyId,
+            propertyTitle: _property!.title,
+          ),
+        ),
+      );
+    }
+  }
+
+  String _resolveImageUrl(String path) {
+    if (path.startsWith('http://') || path.startsWith('https://')) {
+      return path;
+    }
+    final normalized = path.startsWith('/') ? path.substring(1) : path;
+    return '${ApiConfig.baseUrl}/$normalized';
+  }
+}

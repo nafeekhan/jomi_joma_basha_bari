@@ -1,51 +1,45 @@
-import 'dart:convert';
-import 'package:http/http.dart' as http;
 import '../models/room.dart';
 import '../config/api_config.dart';
 import 'api_service.dart';
 
 /// Service for room-related API calls
 class RoomService {
-  final ApiService _apiService = ApiService();
+  final ApiService _apiService;
+
+  RoomService({ApiService? apiService}) : _apiService = apiService ?? ApiService();
 
   /// Get all rooms for a property (with viewpoints)
   Future<List<Room>> getRoomsByProperty(String propertyId) async {
     try {
-      final response = await http.get(
-        Uri.parse('${ApiConfig.baseUrl}/api/rooms/properties/$propertyId/rooms'),
-      );
+      final response = await _apiService.get(ApiConfig.roomsByProperty(propertyId));
 
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        if (data['success'] == true) {
-          final roomsJson = data['data']['rooms'] as List;
-          return roomsJson.map((json) => Room.fromJson(json)).toList();
-        }
+      if (response['success'] == true && response['data'] != null) {
+        final roomsJson = response['data']['rooms'] as List<dynamic>;
+        return roomsJson
+            .map((json) => Room.fromJson(json as Map<String, dynamic>))
+            .toList();
+      } else {
+        throw ApiException(response['message'] as String? ?? 'Failed to load rooms');
       }
-      throw Exception('Failed to load rooms');
     } catch (e) {
-      print('Error loading rooms: $e');
-      rethrow;
+      if (e is ApiException) rethrow;
+      throw ApiException('Get rooms error: $e');
     }
   }
 
   /// Get a single room by ID
   Future<Room> getRoomById(String roomId) async {
     try {
-      final response = await http.get(
-        Uri.parse('${ApiConfig.baseUrl}/api/rooms/$roomId'),
-      );
+      final response = await _apiService.get(ApiConfig.roomById(roomId));
 
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        if (data['success'] == true) {
-          return Room.fromJson(data['data']['room']);
-        }
+      if (response['success'] == true && response['data'] != null) {
+        return Room.fromJson(response['data']['room'] as Map<String, dynamic>);
+      } else {
+        throw ApiException(response['message'] as String? ?? 'Failed to load room');
       }
-      throw Exception('Failed to load room');
     } catch (e) {
-      print('Error loading room: $e');
-      rethrow;
+      if (e is ApiException) rethrow;
+      throw ApiException('Get room error: $e');
     }
   }
 
@@ -54,31 +48,25 @@ class RoomService {
     required String propertyId,
     required String roomName,
     required int roomOrder,
-    String? token,
   }) async {
     try {
-      final response = await http.post(
-        Uri.parse('${ApiConfig.baseUrl}/api/rooms/properties/$propertyId/rooms'),
-        headers: {
-          'Content-Type': 'application/json',
-          if (token != null) 'Authorization': 'Bearer $token',
-        },
-        body: json.encode({
+      final response = await _apiService.post(
+        ApiConfig.roomsByProperty(propertyId),
+        body: {
           'room_name': roomName,
           'room_order': roomOrder,
-        }),
+        },
+        requiresAuth: true,
       );
 
-      if (response.statusCode == 201) {
-        final data = json.decode(response.body);
-        if (data['success'] == true) {
-          return Room.fromJson(data['data']['room']);
-        }
+      if (response['success'] == true && response['data'] != null) {
+        return Room.fromJson(response['data']['room'] as Map<String, dynamic>);
+      } else {
+        throw ApiException(response['message'] as String? ?? 'Failed to create room');
       }
-      throw Exception('Failed to create room');
     } catch (e) {
-      print('Error creating room: $e');
-      rethrow;
+      if (e is ApiException) rethrow;
+      throw ApiException('Create room error: $e');
     }
   }
 
@@ -88,7 +76,6 @@ class RoomService {
     String? roomName,
     int? roomOrder,
     String? defaultViewpointId,
-    String? token,
   }) async {
     try {
       final body = <String, dynamic>{};
@@ -96,44 +83,37 @@ class RoomService {
       if (roomOrder != null) body['room_order'] = roomOrder;
       if (defaultViewpointId != null) body['default_viewpoint_id'] = defaultViewpointId;
 
-      final response = await http.put(
-        Uri.parse('${ApiConfig.baseUrl}/api/rooms/$roomId'),
-        headers: {
-          'Content-Type': 'application/json',
-          if (token != null) 'Authorization': 'Bearer $token',
-        },
-        body: json.encode(body),
+      final response = await _apiService.put(
+        ApiConfig.roomById(roomId),
+        body: body,
+        requiresAuth: true,
       );
 
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        if (data['success'] == true) {
-          return Room.fromJson(data['data']['room']);
-        }
+      if (response['success'] == true && response['data'] != null) {
+        return Room.fromJson(response['data']['room'] as Map<String, dynamic>);
+      } else {
+        throw ApiException(response['message'] as String? ?? 'Failed to update room');
       }
-      throw Exception('Failed to update room');
     } catch (e) {
-      print('Error updating room: $e');
-      rethrow;
+      if (e is ApiException) rethrow;
+      throw ApiException('Update room error: $e');
     }
   }
 
   /// Delete a room
-  Future<void> deleteRoom(String roomId, String token) async {
+  Future<void> deleteRoom(String roomId) async {
     try {
-      final response = await http.delete(
-        Uri.parse('${ApiConfig.baseUrl}/api/rooms/$roomId'),
-        headers: {
-          'Authorization': 'Bearer $token',
-        },
+      final response = await _apiService.delete(
+        ApiConfig.roomById(roomId),
+        requiresAuth: true,
       );
 
-      if (response.statusCode != 200) {
-        throw Exception('Failed to delete room');
+      if (response['success'] != true) {
+        throw ApiException(response['message'] as String? ?? 'Failed to delete room');
       }
     } catch (e) {
-      print('Error deleting room: $e');
-      rethrow;
+      if (e is ApiException) rethrow;
+      throw ApiException('Delete room error: $e');
     }
   }
 
@@ -141,31 +121,24 @@ class RoomService {
   Future<Room> setDefaultViewpoint({
     required String roomId,
     required String viewpointId,
-    required String token,
   }) async {
     try {
-      final response = await http.put(
-        Uri.parse('${ApiConfig.baseUrl}/api/rooms/$roomId/default-viewpoint'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-        body: json.encode({
+      final response = await _apiService.put(
+        ApiConfig.roomDefaultViewpoint(roomId),
+        body: {
           'viewpoint_id': viewpointId,
-        }),
+        },
+        requiresAuth: true,
       );
 
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        if (data['success'] == true) {
-          return Room.fromJson(data['data']['room']);
-        }
+      if (response['success'] == true && response['data'] != null) {
+        return Room.fromJson(response['data']['room'] as Map<String, dynamic>);
+      } else {
+        throw ApiException(response['message'] as String? ?? 'Failed to set default viewpoint');
       }
-      throw Exception('Failed to set default viewpoint');
     } catch (e) {
-      print('Error setting default viewpoint: $e');
-      rethrow;
+      if (e is ApiException) rethrow;
+      throw ApiException('Set default viewpoint error: $e');
     }
   }
 }
-

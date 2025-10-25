@@ -2,118 +2,107 @@ import 'package:flutter/material.dart';
 
 import '../../models/property.dart';
 import '../../models/search_filter.dart';
-import '../../services/property_service.dart';
+import '../../models/user.dart';
+import '../../utils/dummy_data.dart';
 import '../../utils/responsive.dart';
+import '../../utils/storage_helper.dart';
 import '../../widgets/advanced_search_sheet.dart';
+import '../../widgets/bottom_search_bar.dart';
+import '../../widgets/main_navigation_bar.dart';
 import '../../widgets/property_card.dart';
 import '../property_detail/property_detail_screen.dart';
 
 class PropertyBrowseScreen extends StatefulWidget {
   final SearchFilter initialFilter;
+  final bool autoOpenAdvanced;
 
-  const PropertyBrowseScreen({super.key, this.initialFilter = const SearchFilter()});
+  const PropertyBrowseScreen({
+    super.key,
+    this.initialFilter = const SearchFilter(),
+    this.autoOpenAdvanced = false,
+  });
 
   @override
   State<PropertyBrowseScreen> createState() => _PropertyBrowseScreenState();
 }
 
 class _PropertyBrowseScreenState extends State<PropertyBrowseScreen> {
-  final PropertyService _propertyService = PropertyService();
   final ScrollController _scrollController = ScrollController();
   final TextEditingController _searchController = TextEditingController();
 
+  User? _currentUser;
+  late SearchFilter _filter;
+  late List<Property> _allProperties;
   List<Property> _properties = [];
-  SearchFilter _filter = const SearchFilter();
   bool _isLoading = true;
-  bool _isLoadingMore = false;
-  bool _hasMore = true;
-  String? _error;
-  int _page = 1;
 
   @override
   void initState() {
     super.initState();
     _filter = widget.initialFilter;
     _searchController.text = _filter.query ?? '';
-    _fetchProperties(reset: true);
-    _scrollController.addListener(_onScroll);
+    _initialise();
   }
 
-  @override
-  void dispose() {
-    _propertyService.dispose();
-    _scrollController.dispose();
-    _searchController.dispose();
-    super.dispose();
-  }
-
-  void _onScroll() {
-    if (_scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 200) {
-      if (!_isLoadingMore && _hasMore) {
-        _fetchProperties();
-      }
+  Future<void> _initialise() async {
+    final user = await StorageHelper.getUser();
+    _allProperties = DummyData.properties;
+    setState(() {
+      _currentUser = user;
+      _properties = DummyData.filterProperties(_filter, source: _allProperties);
+      _isLoading = false;
+    });
+    if (widget.autoOpenAdvanced) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _openAdvancedFilters());
     }
   }
 
-  Future<void> _fetchProperties({bool reset = false}) async {
-    try {
-      if (reset) {
-        setState(() {
-          _isLoading = true;
-          _error = null;
-          _page = 1;
-          _hasMore = true;
-        });
+  void _handleSearch(String value) {
+    final trimmed = value.trim();
+    setState(() {
+      if (trimmed.isEmpty) {
+        _filter = _filter.copyWith(clearQuery: true);
       } else {
-        if (!_hasMore) return;
-        setState(() {
-          _isLoadingMore = true;
-        });
+        _filter = _filter.copyWith(query: trimmed);
       }
-
-      final results = await _propertyService.getProperties(
-        filter: _filter,
-        page: _page,
-        limit: 12,
-      );
-
-      setState(() {
-        if (reset) {
-          _properties = results;
-        } else {
-          _properties = [..._properties, ...results];
-        }
-        _hasMore = results.length == 12;
-        _page += 1;
-        _isLoading = false;
-        _isLoadingMore = false;
-      });
-    } catch (e) {
-      setState(() {
-        _isLoading = false;
-        _isLoadingMore = false;
-        _error = e.toString();
-      });
-    }
+      _properties = DummyData.filterProperties(_filter, source: _allProperties);
+    });
   }
 
-  void _openAdvancedFilters() async {
+  Future<void> _openAdvancedFilters() async {
     final result = await AdvancedSearchSheet.show(context, _filter);
     if (result != null) {
       setState(() {
         _filter = result;
         _searchController.text = result.query ?? '';
+        _properties = DummyData.filterProperties(_filter, source: _allProperties);
       });
-      _fetchProperties(reset: true);
     }
   }
 
-  void _applyQuickFilter(SearchFilter filter) {
+  void _setPropertyType(PropertyType? type) {
     setState(() {
-      _filter = filter;
-      _searchController.text = filter.query ?? '';
+      if (type == null) {
+        _filter = _filter.copyWith(clearPropertyType: true);
+      } else {
+        _filter = _filter.copyWith(propertyType: type);
+      }
+      _properties = DummyData.filterProperties(_filter, source: _allProperties);
     });
-    _fetchProperties(reset: true);
+  }
+
+  void _setSort(String? sort) {
+    setState(() {
+      _filter = _filter.copyWith(sortBy: sort);
+      _properties = DummyData.filterProperties(_filter, source: _allProperties);
+    });
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    _searchController.dispose();
+    super.dispose();
   }
 
   @override
@@ -121,231 +110,125 @@ class _PropertyBrowseScreenState extends State<PropertyBrowseScreen> {
     final isDesktop = Responsive.isDesktop(context);
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Properties'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.tune),
-            tooltip: 'Advanced filters',
-            onPressed: _openAdvancedFilters,
-          ),
-        ],
-      ),
-      body: Row(
-        children: [
-          if (isDesktop)
-            SizedBox(
-              width: 280,
-              child: _buildFilterPane(showAdvanced: false),
-            ),
-          Expanded(
-            child: _buildResults(),
-          ),
-        ],
-      ),
-      floatingActionButton: isDesktop
-          ? null
-          : FloatingActionButton.extended(
-              onPressed: _openAdvancedFilters,
-              icon: const Icon(Icons.tune),
-              label: const Text('Filters'),
+      appBar: MainNavigationBar(currentUser: _currentUser),
+      bottomNavigationBar: Responsive.isMobile(context)
+          ? BottomSearchBar(
+              controller: _searchController,
+              hintText: 'Search properties',
+              onSearch: _handleSearch,
+              onFilterTap: _openAdvancedFilters,
+            )
+          : null,
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (isDesktop) SizedBox(width: 320, child: _buildDesktopSidebar()),
+                Expanded(child: _buildContent()),
+              ],
             ),
     );
   }
 
-  Widget _buildFilterPane({bool showAdvanced = true}) {
+  Widget _buildDesktopSidebar() {
     return Container(
       color: Colors.grey.shade50,
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-      child: ListView(
-        children: [
-          TextField(
-            controller: _searchController,
-            decoration: const InputDecoration(
-              labelText: 'Search',
-              prefixIcon: Icon(Icons.search),
+      padding: const EdgeInsets.fromLTRB(24, 24, 24, 32),
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              controller: _searchController,
+              decoration: const InputDecoration(
+                labelText: 'Search',
+                prefixIcon: Icon(Icons.search),
+              ),
+              onSubmitted: _handleSearch,
             ),
-            onSubmitted: (value) {
-              _filter = _filter.copyWith(query: value.trim().isEmpty ? null : value.trim());
-              _fetchProperties(reset: true);
-            },
-          ),
-          const SizedBox(height: 20),
-          const Text('Property type', style: TextStyle(fontWeight: FontWeight.w600)),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            children: [
-              ChoiceChip(
-                label: const Text('All'),
-                selected: _filter.propertyType == null,
-                onSelected: (_) => _applyQuickFilter(_filter.copyWith(propertyType: null)),
-              ),
-              ChoiceChip(
-                label: const Text('For Sale'),
-                selected: _filter.propertyType == PropertyType.buy,
-                onSelected: (_) => _applyQuickFilter(_filter.copyWith(propertyType: PropertyType.buy)),
-              ),
-              ChoiceChip(
-                label: const Text('For Rent'),
-                selected: _filter.propertyType == PropertyType.rent,
-                onSelected: (_) => _applyQuickFilter(_filter.copyWith(propertyType: PropertyType.rent)),
-              ),
-            ],
-          ),
-          const SizedBox(height: 24),
-          const Text('Sort by', style: TextStyle(fontWeight: FontWeight.w600)),
-          const SizedBox(height: 12),
-          DropdownButtonFormField<String>(
-            initialValue: _filter.sortBy ?? 'relevance',
-            items: const [
-              DropdownMenuItem(value: 'relevance', child: Text('Best Match')),
-              DropdownMenuItem(value: 'closeness', child: Text('Closest')),
-              DropdownMenuItem(value: 'price_asc', child: Text('Price: Low to High')),
-              DropdownMenuItem(value: 'price_desc', child: Text('Price: High to Low')),
-              DropdownMenuItem(value: 'newest', child: Text('Newest listings')),
-              DropdownMenuItem(value: 'rating', child: Text('Top rated')),
-            ],
-            onChanged: (value) {
-              _applyQuickFilter(_filter.copyWith(sortBy: value));
-            },
-          ),
-          const SizedBox(height: 24),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: const Icon(Icons.tune),
-            title: const Text('Advanced filters'),
-            subtitle: const Text('Price, tags, location, and more'),
-            onTap: _openAdvancedFilters,
-          ),
-        ],
+            const SizedBox(height: 24),
+            const Text('Property type', style: TextStyle(fontWeight: FontWeight.w600)),
+            const SizedBox(height: 12),
+            _buildPropertyTypeChips(),
+            const SizedBox(height: 24),
+            const Text('Sort by', style: TextStyle(fontWeight: FontWeight.w600)),
+            const SizedBox(height: 12),
+            _buildSortDropdown(isDesktop: true),
+            const SizedBox(height: 24),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.tune),
+              title: const Text('Advanced filters'),
+              subtitle: const Text('Price, tags, location, and more'),
+              onTap: _openAdvancedFilters,
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildResults() {
-    if (_isLoading) {
-      return const Center(child: CircularProgressIndicator());
-    }
+  Widget _buildContent() {
+    final isDesktop = Responsive.isDesktop(context);
 
-    if (_error != null) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(Icons.error_outline, size: 48, color: Colors.red),
-              const SizedBox(height: 16),
-              Text(
-                _error!,
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 24),
-              ElevatedButton(
-                onPressed: () => _fetchProperties(reset: true),
-                child: const Text('Retry'),
-              ),
-            ],
+    return CustomScrollView(
+      controller: _scrollController,
+      slivers: [
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(
+              isDesktop ? 32 : 16,
+              24,
+              isDesktop ? 32 : 16,
+              12,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Found ${_properties.length} ${_properties.length == 1 ? 'property' : 'properties'}',
+                  style: Theme.of(context).textTheme.headlineSmall,
+                ),
+                const SizedBox(height: 12),
+                if (!isDesktop) ...[
+                  _buildPropertyTypeChips(),
+                  const SizedBox(height: 12),
+                  _buildSortDropdown(),
+                  const SizedBox(height: 8),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: OutlinedButton.icon(
+                      onPressed: _openAdvancedFilters,
+                      icon: const Icon(Icons.tune),
+                      label: const Text('Advanced filters'),
+                    ),
+                  ),
+                ],
+              ],
+            ),
           ),
         ),
-      );
-    }
-
-    if (_properties.isEmpty) {
-      return const Center(
-        child: Text('No results found. Adjust filters and try again.'),
-      );
-    }
-
-    final isDesktop = Responsive.isDesktop(context);
-    final crossAxisCount = isDesktop
-        ? 3
-        : Responsive.isTablet(context)
-            ? 2
-            : 1;
-
-    return RefreshIndicator(
-      onRefresh: () => _fetchProperties(reset: true),
-      child: CustomScrollView(
-        controller: _scrollController,
-        slivers: [
-          if (!isDesktop)
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    TextField(
-                      controller: _searchController,
-                      decoration: const InputDecoration(
-                        hintText: 'Search properties',
-                        prefixIcon: Icon(Icons.search),
-                      ),
-                      onSubmitted: (value) {
-                        _filter = _filter.copyWith(query: value.trim().isEmpty ? null : value.trim());
-                        _fetchProperties(reset: true);
-                      },
-                    ),
-                    const SizedBox(height: 12),
-                    Wrap(
-                      spacing: 8,
-                      children: [
-                        ChoiceChip(
-                          label: const Text('All'),
-                          selected: _filter.propertyType == null,
-                          onSelected: (_) => _applyQuickFilter(_filter.copyWith(propertyType: null)),
-                        ),
-                        ChoiceChip(
-                          label: const Text('For Sale'),
-                          selected: _filter.propertyType == PropertyType.buy,
-                          onSelected: (_) => _applyQuickFilter(_filter.copyWith(propertyType: PropertyType.buy)),
-                        ),
-                        ChoiceChip(
-                          label: const Text('For Rent'),
-                          selected: _filter.propertyType == PropertyType.rent,
-                          onSelected: (_) => _applyQuickFilter(_filter.copyWith(propertyType: PropertyType.rent)),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: DropdownButtonFormField<String>(
-                            initialValue: _filter.sortBy ?? 'relevance',
-                            decoration: const InputDecoration(labelText: 'Sort by'),
-                            items: const [
-                              DropdownMenuItem(value: 'relevance', child: Text('Best Match')),
-                              DropdownMenuItem(value: 'closeness', child: Text('Closest')),
-                              DropdownMenuItem(value: 'price_asc', child: Text('Price: Low to High')),
-                              DropdownMenuItem(value: 'price_desc', child: Text('Price: High to Low')),
-                              DropdownMenuItem(value: 'newest', child: Text('Newest listings')),
-                            ],
-                            onChanged: (value) => _applyQuickFilter(_filter.copyWith(sortBy: value)),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        OutlinedButton.icon(
-                          onPressed: _openAdvancedFilters,
-                          icon: const Icon(Icons.filter_alt),
-                          label: const Text('Advanced'),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
+        if (_properties.isEmpty)
+          const SliverFillRemaining(
+            hasScrollBody: false,
+            child: Center(
+              child: Text('No properties match your filters. Try adjusting them.'),
             ),
+          )
+        else
           SliverPadding(
             padding: EdgeInsets.symmetric(
               horizontal: Responsive.isDesktop(context) ? 32 : 16,
-              vertical: 24,
+              vertical: 16,
             ),
             sliver: SliverGrid(
               gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: crossAxisCount,
+                crossAxisCount: Responsive.isDesktop(context)
+                    ? 3
+                    : Responsive.isTablet(context)
+                        ? 2
+                        : 1,
                 crossAxisSpacing: 16,
                 mainAxisSpacing: 16,
                 childAspectRatio: 0.78,
@@ -359,7 +242,10 @@ class _PropertyBrowseScreenState extends State<PropertyBrowseScreen> {
                       Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (context) => PropertyDetailScreen(propertyId: property.id),
+                          builder: (_) => PropertyDetailScreen(
+                            propertyId: property.id,
+                            initialProperty: property,
+                          ),
                         ),
                       );
                     },
@@ -369,22 +255,61 @@ class _PropertyBrowseScreenState extends State<PropertyBrowseScreen> {
               ),
             ),
           ),
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 24),
-              child: Center(
-                child: _isLoadingMore
-                    ? const CircularProgressIndicator()
-                    : _hasMore
-                        ? OutlinedButton(
-                            onPressed: () => _fetchProperties(),
-                            child: const Text('Load more'),
-                          )
-                        : const Text('You have reached the end of the list'),
-              ),
-            ),
-          ),
-        ],
+        const SliverToBoxAdapter(child: SizedBox(height: 32)),
+      ],
+    );
+  }
+
+  Widget _buildPropertyTypeChips() {
+    final selected = _filter.propertyType;
+
+    return Wrap(
+      spacing: 8,
+      children: [
+        ChoiceChip(
+          label: const Text('All'),
+          selected: selected == null,
+          onSelected: (_) => _setPropertyType(null),
+        ),
+        ChoiceChip(
+          label: const Text('For Sale'),
+          selected: selected == PropertyType.buy,
+          onSelected: (_) => _setPropertyType(PropertyType.buy),
+        ),
+        ChoiceChip(
+          label: const Text('For Rent'),
+          selected: selected == PropertyType.rent,
+          onSelected: (_) => _setPropertyType(PropertyType.rent),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSortDropdown({bool isDesktop = false}) {
+    final value = _filter.sortBy ?? 'relevance';
+    return InputDecorator(
+      decoration: InputDecoration(
+        labelText: isDesktop ? null : 'Sort by',
+        isDense: true,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: value,
+          isExpanded: true,
+          onChanged: _setSort,
+          items: const [
+            DropdownMenuItem(value: 'relevance', child: Text('Best Match')),
+            DropdownMenuItem(value: 'price_asc', child: Text('Price: Low to High')),
+            DropdownMenuItem(value: 'price_desc', child: Text('Price: High to Low')),
+            DropdownMenuItem(value: 'newest', child: Text('Newest listings')),
+            DropdownMenuItem(value: 'rating', child: Text('Top rated')),
+            DropdownMenuItem(value: 'size_desc', child: Text('Largest homes')),
+          ],
+        ),
       ),
     );
   }

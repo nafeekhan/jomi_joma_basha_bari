@@ -2,6 +2,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../config/app_theme.dart';
+import '../config/api_config.dart';
 import '../models/property.dart';
 
 class PropertyCard extends StatelessWidget {
@@ -12,7 +13,8 @@ class PropertyCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final imageUrl = property.coverImageUrl ?? property.images?.firstOrNull?.imageUrl;
+    final relativeUrl = property.coverImageUrl ?? property.images?.firstOrNull?.imageUrl;
+    final imageUrl = _resolveImageUrl(relativeUrl);
 
     return InkWell(
       onTap: onTap,
@@ -36,7 +38,7 @@ class PropertyCard extends StatelessWidget {
               borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
               child: AspectRatio(
                 aspectRatio: 4 / 3,
-                child: imageUrl != null && imageUrl.isNotEmpty
+                child: imageUrl != null
                     ? CachedNetworkImage(
                         imageUrl: imageUrl,
                         fit: BoxFit.cover,
@@ -136,6 +138,15 @@ class PropertyCard extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  String? _resolveImageUrl(String? path) {
+    if (path == null || path.isEmpty) return null;
+    if (path.startsWith('http://') || path.startsWith('https://')) {
+      return path;
+    }
+    final normalized = path.startsWith('/') ? path.substring(1) : path;
+    return '${ApiConfig.baseUrl}/$normalized';
   }
 }
 

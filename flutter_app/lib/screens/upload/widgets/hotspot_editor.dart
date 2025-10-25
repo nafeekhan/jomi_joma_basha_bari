@@ -40,11 +40,11 @@ class HotspotEditor extends StatefulWidget {
   final Function(List<HotspotModel>) onHotspotsChanged;
 
   const HotspotEditor({
-    Key? key,
+    super.key,
     required this.scene,
     required this.allScenes,
     required this.onHotspotsChanged,
-  }) : super(key: key);
+  });
 
   @override
   State<HotspotEditor> createState() => _HotspotEditorState();
@@ -107,8 +107,8 @@ class _HotspotEditorState extends State<HotspotEditor> {
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   colors: [
-                    const Color(0xFF667EEA).withOpacity(0.1),
-                    const Color(0xFF764BA2).withOpacity(0.1),
+                    const Color(0xFF667EEA).withValues(alpha: 0.1),
+                    const Color(0xFF764BA2).withValues(alpha: 0.1),
                   ],
                 ),
                 borderRadius: BorderRadius.circular(8),
@@ -156,7 +156,7 @@ class _HotspotEditorState extends State<HotspotEditor> {
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.2),
+            color: Colors.black.withValues(alpha: 0.2),
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),
@@ -197,7 +197,7 @@ class _HotspotEditorState extends State<HotspotEditor> {
                   vertical: 10,
                 ),
                 decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.8),
+                  color: Colors.black.withValues(alpha: 0.8),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: const Text(
@@ -232,13 +232,13 @@ class _HotspotEditorState extends State<HotspotEditor> {
           height: 50,
           decoration: BoxDecoration(
             color: isSelected
-                ? const Color(0xFFF5576C).withOpacity(0.9)
-                : const Color(0xFF667EEA).withOpacity(0.9),
+                ? const Color(0xFFF5576C).withValues(alpha: 0.9)
+                : const Color(0xFF667EEA).withValues(alpha: 0.9),
             shape: BoxShape.circle,
             border: Border.all(color: Colors.white, width: 3),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.3),
+                color: Colors.black.withValues(alpha: 0.3),
                 blurRadius: 12,
                 offset: const Offset(0, 4),
               ),
@@ -261,7 +261,7 @@ class _HotspotEditorState extends State<HotspotEditor> {
                     width: 150,
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.9),
+                      color: Colors.black.withValues(alpha: 0.9),
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: Column(
@@ -306,7 +306,7 @@ class _HotspotEditorState extends State<HotspotEditor> {
         width: 50,
         height: 50,
         decoration: BoxDecoration(
-          color: const Color(0xFFFBBF18).withOpacity(0.9),
+      color: const Color(0xFFFBBF18).withValues(alpha: 0.9),
           shape: BoxShape.circle,
           border: Border.all(color: Colors.white, width: 3),
         ),
@@ -389,7 +389,7 @@ class _HotspotEditorState extends State<HotspotEditor> {
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: isSelected
-            ? const Color(0xFF667EEA).withOpacity(0.1)
+            ? const Color(0xFF667EEA).withValues(alpha: 0.1)
             : Colors.grey[100],
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
@@ -607,7 +607,7 @@ class _HotspotEditorState extends State<HotspotEditor> {
       y: y,
       yaw: yaw,
       pitch: pitch,
-      targetSceneId: targetScene.id ?? '',
+      targetSceneId: targetScene.id,
       targetSceneName: targetScene.name,
       title: 'Go to ${targetScene.name}',
     );
@@ -646,4 +646,3 @@ class _HotspotEditorState extends State<HotspotEditor> {
     );
   }
 }
-

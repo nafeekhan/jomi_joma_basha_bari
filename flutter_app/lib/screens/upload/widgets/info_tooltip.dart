@@ -10,11 +10,11 @@ class InfoTooltip extends StatefulWidget {
   final TooltipDirection direction;
 
   const InfoTooltip({
-    Key? key,
+    super.key,
     required this.child,
     required this.message,
     this.direction = TooltipDirection.down,
-  }) : super(key: key);
+  });
 
   @override
   State<InfoTooltip> createState() => _InfoTooltipState();
@@ -82,4 +82,3 @@ class _InfoTooltipState extends State<InfoTooltip> {
     );
   }
 }
-

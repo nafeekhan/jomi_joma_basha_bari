@@ -214,6 +214,20 @@ class Scene extends Equatable {
     return const [];
   }
 
+  String? get previewImageUrl {
+    final localPaths = _localImagePaths;
+    if (localPaths != null && localPaths.isNotEmpty) {
+      return localPaths.first;
+    }
+
+    final remoteImages = images;
+    if (remoteImages != null && remoteImages.isNotEmpty) {
+      return remoteImages.first.filePath;
+    }
+
+    return null;
+  }
+
   factory Scene.fromJson(Map<String, dynamic> json) {
     return Scene(
       id: json['id'] as String,
